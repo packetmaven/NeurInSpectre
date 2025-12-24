@@ -1,0 +1,17 @@
+profile: red
+adversarial:
+  ts_inverse_threshold: 0.8
+  voxel_resolution: 32
+  ednn_threshold: 0.7
+evasion:
+  transport_dim: 64
+  time_window: 100
+  demarking_threshold: 0.6
+parallel_processing: true
+max_workers: 4
+outputs:
+  artifacts_dir: artifacts/red
+  visuals: true
+  json_reports: true
+
+

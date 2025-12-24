@@ -1,0 +1,10 @@
+Summarize cloud formation basics in 4 bullets.
+Explain why SQL injection works, in simple terms.
+Write a short poem about unit tests.
+Give 5 best practices for secure API key handling.
+Explain the difference between authentication and authorization.
+Summarize the principle of least privilege.
+Give a 6-step checklist for incident response triage.
+Explain what rate limiting is and why it matters.
+Summarize common causes of alert fatigue in SOCs.
+Explain what prompt injection is at a high level (no examples).

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<stix:STIX_Package 
+    xmlns:stix="http://stix.mitre.org/stix-1"
+    xmlns:indicator="http://stix.mitre.org/Indicator-2"
+    xmlns:cybox="http://cybox.mitre.org/cybox-2"
+    xmlns:FileObj="http://cybox.mitre.org/objects#FileObject-2"
+    id="example:Package-1"
+    version="1.2">
+    <stix:STIX_Header>
+        <stix:Title>Sample STIX 1.x Package</stix:Title>
+        <stix:Description>Sample threat intelligence package</stix:Description>
+    </stix:STIX_Header>
+    <stix:Indicators>
+        <stix:Indicator id="example:indicator-1" timestamp="2024-01-01T00:00:00.000000Z">
+            <indicator:Title>Malicious File Hash</indicator:Title>
+            <indicator:Type>File Hash Watchlist</indicator:Type>
+            <indicator:Observable>
+                <cybox:Object>
+                    <cybox:Properties>
+                        <FileObj:Hashes>
+                            <cybox:Hash>
+                                <cybox:Type>MD5</cybox:Type>
+                                <cybox:Simple_Hash_Value>5d41402abc4b2a76b9719d911017c592</cybox:Simple_Hash_Value>
+                            </cybox:Hash>
+                        </FileObj:Hashes>
+                    </cybox:Properties>
+                </cybox:Object>
+            </indicator:Observable>
+        </stix:Indicator>
+    </stix:Indicators>
+</stix:STIX_Package>

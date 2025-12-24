@@ -1,0 +1,40 @@
+Quarterly revenue report summary for internal testing.
+Customer support transcript: password reset workflow clarification.
+Meeting notes: model monitoring thresholds and alert routing.
+Incident response playbook: containment, eradication, recovery.
+Training data governance checklist: retention and access controls.
+Synthetic secret token: SENSITIVE_TOKEN_001 (placeholder for testing).
+Synthetic secret token: SENSITIVE_TOKEN_002 (placeholder for testing).
+Synthetic secret token: SENSITIVE_TOKEN_003 (placeholder for testing).
+Benign corpus line 00: telemetry aggregation and anomaly triage notes.
+Benign corpus line 01: telemetry aggregation and anomaly triage notes.
+Benign corpus line 02: telemetry aggregation and anomaly triage notes.
+Benign corpus line 03: telemetry aggregation and anomaly triage notes.
+Benign corpus line 04: telemetry aggregation and anomaly triage notes.
+Benign corpus line 05: telemetry aggregation and anomaly triage notes.
+Benign corpus line 06: telemetry aggregation and anomaly triage notes.
+Benign corpus line 07: telemetry aggregation and anomaly triage notes.
+Benign corpus line 08: telemetry aggregation and anomaly triage notes.
+Benign corpus line 09: telemetry aggregation and anomaly triage notes.
+Benign corpus line 10: telemetry aggregation and anomaly triage notes.
+Benign corpus line 11: telemetry aggregation and anomaly triage notes.
+Benign corpus line 12: telemetry aggregation and anomaly triage notes.
+Benign corpus line 13: telemetry aggregation and anomaly triage notes.
+Benign corpus line 14: telemetry aggregation and anomaly triage notes.
+Benign corpus line 15: telemetry aggregation and anomaly triage notes.
+Benign corpus line 16: telemetry aggregation and anomaly triage notes.
+Benign corpus line 17: telemetry aggregation and anomaly triage notes.
+Benign corpus line 18: telemetry aggregation and anomaly triage notes.
+Benign corpus line 19: telemetry aggregation and anomaly triage notes.
+Benign corpus line 20: telemetry aggregation and anomaly triage notes.
+Benign corpus line 21: telemetry aggregation and anomaly triage notes.
+Benign corpus line 22: telemetry aggregation and anomaly triage notes.
+Benign corpus line 23: telemetry aggregation and anomaly triage notes.
+Benign corpus line 24: telemetry aggregation and anomaly triage notes.
+Benign corpus line 25: telemetry aggregation and anomaly triage notes.
+Benign corpus line 26: telemetry aggregation and anomaly triage notes.
+Benign corpus line 27: telemetry aggregation and anomaly triage notes.
+Benign corpus line 28: telemetry aggregation and anomaly triage notes.
+Benign corpus line 29: telemetry aggregation and anomaly triage notes.
+Benign corpus line 30: telemetry aggregation and anomaly triage notes.
+Benign corpus line 31: telemetry aggregation and anomaly triage notes.

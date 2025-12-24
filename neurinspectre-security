@@ -1,0 +1,481 @@
+#!/bin/bash
+
+# NeurInSpectre Security CLI - Easy command-line access to cutting-edge AI security tools
+# Based on latest 2024-2025 research: TS-Inverse, ConcreTizer, EDNN, AttentionGuard, DeMarking
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Default values
+NEURINSPECTRE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_PATH="$NEURINSPECTRE_DIR/venv"
+PYTHON_CMD="python"
+OUTPUT_DIR="./security_reports"
+THRESHOLD=0.7
+PARALLEL=true
+
+# Check if we're in the venv
+if [[ "$VIRTUAL_ENV" != "" ]]; then
+    PYTHON_CMD="python"
+elif [[ -f "$VENV_PATH/bin/activate" ]]; then
+    source "$VENV_PATH/bin/activate"
+    PYTHON_CMD="python"
+else
+    echo -e "${YELLOW}Warning: Virtual environment not found. Using system Python.${NC}"
+fi
+
+# Function to display help
+show_help() {
+    echo -e "${CYAN}🔒 NeurInSpectre Security CLI${NC}"
+    echo -e "${CYAN}===============================${NC}"
+    echo "Easy command-line access to cutting-edge AI security tools"
+    echo ""
+    echo -e "${GREEN}USAGE:${NC}"
+    echo "  neurinspectre-security <command> [options]"
+    echo ""
+    echo -e "${GREEN}COMMANDS:${NC}"
+    echo -e "  ${BLUE}detect-adversarial${NC} <data_file>     - Detect adversarial attacks (TS-Inverse, ConcreTizer, EDNN, AttentionGuard)"
+    echo -e "  ${BLUE}detect-evasion${NC} <data_file>         - Detect evasion attacks (Neural Transport Dynamics, DeMarking)"
+    echo -e "  ${BLUE}scan-comprehensive${NC} <data_file>     - Run complete security scan with all techniques"
+    echo -e "  ${BLUE}monitor-realtime${NC} <data_directory>  - Real-time continuous security monitoring"
+    echo -e "  ${BLUE}generate-attacks${NC}                   - Generate attack data for testing"
+    echo -e "  ${BLUE}create-dashboard${NC}                   - Create security visualization dashboard"
+    echo -e "  ${BLUE}test-security${NC}                      - Run security module tests"
+    echo -e "  ${BLUE}help${NC}                               - Show this help message"
+    echo ""
+    echo -e "${GREEN}OPTIONS:${NC}"
+    echo -e "  ${YELLOW}--output-dir${NC} <dir>               - Output directory (default: ./security_reports)"
+    echo -e "  ${YELLOW}--threshold${NC} <0.0-1.0>            - Detection threshold (default: 0.7)"
+    echo -e "  ${YELLOW}--parallel${NC}                       - Use parallel processing (default: true)"
+    echo -e "  ${YELLOW}--reference${NC} <file>               - Reference data file for comparison"
+    echo -e "  ${YELLOW}--network-data${NC} <file>            - Network flow data for DeMarking analysis"
+    echo -e "  ${YELLOW}--webhook${NC} <url>                  - Webhook URL for real-time alerts"
+    echo -e "  ${YELLOW}--interval${NC} <seconds>             - Monitoring interval (default: 60)"
+    echo -e "  ${YELLOW}--verbose${NC}                        - Verbose output"
+    echo ""
+    echo -e "${GREEN}EXAMPLES:${NC}"
+    echo -e "  ${CYAN}# Detect adversarial attacks in neural activations${NC}"
+    echo -e "  neurinspectre-security detect-adversarial ./data/activations.npy"
+    echo ""
+    echo -e "  ${CYAN}# Run comprehensive security scan${NC}"
+    echo -e "  neurinspectre-security scan-comprehensive ./data/neural_data.npy --threshold 0.8"
+    echo ""
+    echo -e "  ${CYAN}# Real-time monitoring with webhook alerts${NC}"
+    echo -e "  neurinspectre-security monitor-realtime ./data_stream --webhook https://hooks.slack.com/xxx"
+    echo ""
+    echo -e "  ${CYAN}# Generate attack data for testing${NC}"
+    echo -e "  neurinspectre-security generate-attacks"
+    echo ""
+    echo -e "${GREEN}ATTACK DATA SOURCES:${NC}"
+    echo -e "  ${BLUE}• TS-Inverse:${NC} 'TS-Inverse: Novel gradient inversion attack' (March 2025)"
+    echo -e "  ${BLUE}• ConcreTizer:${NC} 'ConcreTizer: Model inversion attack for 3D point cloud' (March 2025)"
+    echo -e "  ${BLUE}• EDNN:${NC} 'EDNN Attack: Element-wise Differential Nearest Neighbor' (EMNLP 2024)"
+    echo -e "  ${BLUE}• AttentionGuard:${NC} 'AttentionGuard: Transformer-based Misbehavior Detection' (May 2025)"
+    echo -e "  ${BLUE}• DeMarking:${NC} 'DeMarking: Defense for Network Flow Watermarking' (Feb 2024)"
+    echo ""
+}
+
+# Function to check if file exists
+check_file() {
+    if [[ ! -f "$1" ]]; then
+        echo -e "${RED}❌ Error: File not found: $1${NC}"
+        exit 1
+    fi
+}
+
+# Function to check if directory exists
+check_directory() {
+    if [[ ! -d "$1" ]]; then
+        echo -e "${RED}❌ Error: Directory not found: $1${NC}"
+        exit 1
+    fi
+}
+
+# Function to ensure output directory exists
+ensure_output_dir() {
+    mkdir -p "$OUTPUT_DIR"
+    echo -e "${GREEN}📁 Output directory: $OUTPUT_DIR${NC}"
+}
+
+# Function to run adversarial detection
+run_adversarial_detection() {
+    local data_file="$1"
+    check_file "$data_file"
+    ensure_output_dir
+    
+    echo -e "${BLUE}🛡️ Running Adversarial Attack Detection${NC}"
+    echo -e "${BLUE}======================================${NC}"
+    echo -e "📊 Data file: $data_file"
+    echo -e "🎯 Threshold: $THRESHOLD"
+    echo -e "📁 Output: $OUTPUT_DIR"
+    echo ""
+    
+    local cmd="$PYTHON_CMD -m neurinspectre.cli adversarial-detect '$data_file' --output-dir '$OUTPUT_DIR' --threshold $THRESHOLD"
+    
+    if [[ "$REFERENCE_FILE" != "" ]]; then
+        cmd="$cmd --reference-path '$REFERENCE_FILE'"
+    fi
+    
+    if [[ "$VERBOSE" == "true" ]]; then
+        cmd="$cmd --verbose"
+    fi
+    
+    eval "$cmd"
+}
+
+# Function to run evasion detection
+run_evasion_detection() {
+    local data_file="$1"
+    check_file "$data_file"
+    ensure_output_dir
+    
+    echo -e "${BLUE}🚫 Running Evasion Attack Detection${NC}"
+    echo -e "${BLUE}===================================${NC}"
+    echo -e "📊 Data file: $data_file"
+    echo -e "🎯 Threshold: $THRESHOLD"
+    echo -e "📁 Output: $OUTPUT_DIR"
+    echo ""
+    
+    local cmd="$PYTHON_CMD -m neurinspectre.cli evasion-detect '$data_file' --output-dir '$OUTPUT_DIR' --threshold $THRESHOLD"
+    
+    if [[ "$NETWORK_DATA" != "" ]]; then
+        cmd="$cmd --network-data '$NETWORK_DATA'"
+    fi
+    
+    if [[ "$VERBOSE" == "true" ]]; then
+        cmd="$cmd --verbose"
+    fi
+    
+    eval "$cmd"
+}
+
+# Function to run comprehensive scan
+run_comprehensive_scan() {
+    local data_file="$1"
+    check_file "$data_file"
+    ensure_output_dir
+    
+    echo -e "${BLUE}🔒 Running Comprehensive Security Scan${NC}"
+    echo -e "${BLUE}=======================================${NC}"
+    echo -e "📊 Data file: $data_file"
+    echo -e "🎯 Threshold: $THRESHOLD"
+    echo -e "📁 Output: $OUTPUT_DIR"
+    echo ""
+    
+    local cmd="$PYTHON_CMD -m neurinspectre.cli comprehensive-scan '$data_file' --output-dir '$OUTPUT_DIR' --threshold $THRESHOLD"
+    
+    if [[ "$PARALLEL" == "true" ]]; then
+        cmd="$cmd --parallel"
+    fi
+    
+    if [[ "$VERBOSE" == "true" ]]; then
+        cmd="$cmd --verbose"
+    fi
+    
+    eval "$cmd"
+}
+
+# Function to run real-time monitoring
+run_realtime_monitoring() {
+    local data_dir="$1"
+    check_directory "$data_dir"
+    ensure_output_dir
+    
+    echo -e "${BLUE}⏰ Starting Real-time Security Monitoring${NC}"
+    echo -e "${BLUE}=========================================${NC}"
+    echo -e "📁 Data directory: $data_dir"
+    echo -e "📊 Monitoring interval: ${MONITOR_INTERVAL}s"
+    echo -e "🎯 Alert threshold: $THRESHOLD"
+    echo -e "📋 Output: $OUTPUT_DIR"
+    echo ""
+    
+    local cmd="$PYTHON_CMD -m neurinspectre.cli realtime-monitor '$data_dir' --output-dir '$OUTPUT_DIR' --threshold $THRESHOLD --interval ${MONITOR_INTERVAL}"
+    
+    if [[ "$WEBHOOK_URL" != "" ]]; then
+        cmd="$cmd --alert-webhook '$WEBHOOK_URL'"
+        echo -e "🔔 Webhook alerts: $WEBHOOK_URL"
+    fi
+    
+    if [[ "$VERBOSE" == "true" ]]; then
+        cmd="$cmd --verbose"
+    fi
+    
+    echo -e "${YELLOW}Press Ctrl+C to stop monitoring...${NC}"
+    echo ""
+    
+    eval "$cmd"
+}
+
+# Function to generate attack data
+generate_attack_data() {
+    ensure_output_dir
+    
+    echo -e "${BLUE}🎯 Generating Attack Data from Latest Research${NC}"
+    echo -e "${BLUE}=============================================${NC}"
+    echo -e "📁 Output: $OUTPUT_DIR"
+    echo ""
+    
+    cd "$NEURINSPECTRE_DIR"
+    $PYTHON_CMD test_attack_data_generator.py
+    
+    echo ""
+    echo -e "${GREEN}✅ Attack data generated successfully!${NC}"
+    echo -e "${GREEN}📊 Files created:${NC}"
+    echo -e "  • TS-Inverse gradient inversion attacks"
+    echo -e "  • ConcreTizer model inversion attacks"
+    echo -e "  • EDNN element-wise differential attacks"
+    echo -e "  • DeMarking network flow evasion"
+    echo -e "  • Neural transport dynamics evasion"
+    echo -e "  • Clean reference data for comparison"
+}
+
+# Function to create security dashboard
+create_dashboard() {
+    echo -e "${BLUE}📊 Creating Security Visualization Dashboard${NC}"
+    echo -e "${BLUE}============================================${NC}"
+    echo ""
+    
+    cd "$NEURINSPECTRE_DIR"
+    
+    # Check if attack data exists
+    if [[ ! -d "attack_data" ]]; then
+        echo -e "${YELLOW}⚠️ Attack data not found. Generating...${NC}"
+        generate_attack_data
+    fi
+    
+    # Create dashboard
+    $PYTHON_CMD -c "
+import numpy as np
+from neurinspectre.security.visualization.red_blue_team_dashboard import RedBlueTeamDashboard, SecurityAssessment, create_comprehensive_report
+
+# Load attack data
+attack_data = {}
+try:
+    attack_data['ts_inverse'] = np.load('attack_data/ts_inverse_attack_data.npy')
+    attack_data['concretizer'] = np.load('attack_data/concretizer_attack_data.npy')  
+    attack_data['ednn'] = np.load('attack_data/ednn_attack_data.npy')
+    attack_data['demarking'] = np.load('attack_data/demarking_attack_data.npy')
+    attack_data['transport_evasion'] = np.load('attack_data/transport_evasion_attack_data.npy')
+    print('✅ Attack data loaded successfully')
+except Exception as e:
+    print(f'❌ Error loading attack data: {e}')
+    exit(1)
+
+# Create mock detection results
+detection_results = {
+    'ts_inverse': SecurityAssessment(
+        threat_level='HIGH',
+        attack_type='gradient_inversion',
+        confidence=0.87,
+        detection_methods=['ts_inverse_detector', 'gradient_analysis'],
+        evasion_techniques=['frequency_manipulation', 'temporal_correlation'],
+        recommendations={
+            'red_team': ['Improve gradient obfuscation', 'Use adaptive perturbations'],
+            'blue_team': ['Enhance gradient monitoring', 'Deploy real-time detection']
+        },
+        metadata={'source': 'TS-Inverse March 2025'}
+    ),
+    'concretizer': SecurityAssessment(
+        threat_level='MEDIUM',
+        attack_type='model_inversion',
+        confidence=0.73,
+        detection_methods=['concretizer_detector', 'voxel_analysis'],
+        evasion_techniques=['grid_reconstruction', 'systematic_queries'],
+        recommendations={
+            'red_team': ['Vary query patterns', 'Use noise injection'],
+            'blue_team': ['Implement query rate limiting', 'Add reconstruction noise']
+        },
+        metadata={'source': 'ConcreTizer March 2025'}
+    ),
+    'ednn': SecurityAssessment(
+        threat_level='HIGH',
+        attack_type='embedding_manipulation',
+        confidence=0.91,
+        detection_methods=['ednn_detector', 'nearest_neighbor_analysis'],
+        evasion_techniques=['element_wise_differential', 'embedding_obfuscation'],
+        recommendations={
+            'red_team': ['Enhance differential patterns', 'Use dynamic embeddings'],
+            'blue_team': ['Strengthen embedding validation', 'Monitor NN relationships']
+        },
+        metadata={'source': 'EDNN EMNLP 2024'}
+    ),
+    'demarking': SecurityAssessment(
+        threat_level='MEDIUM',
+        attack_type='network_evasion',
+        confidence=0.68,
+        detection_methods=['demarking_detector', 'flow_analysis'],
+        evasion_techniques=['gan_ipd_generation', 'watermark_removal'],
+        recommendations={
+            'red_team': ['Improve GAN quality', 'Use adaptive timing'],
+            'blue_team': ['Enhance watermark robustness', 'Deploy flow monitoring']
+        },
+        metadata={'source': 'DeMarking Feb 2024'}
+    ),
+    'transport_evasion': SecurityAssessment(
+        threat_level='HIGH',
+        attack_type='transport_evasion',
+        confidence=0.84,
+        detection_methods=['transport_detector', 'dynamics_analysis'],
+        evasion_techniques=['phase_transition_disruption', 'critical_point_perturbation'],
+        recommendations={
+            'red_team': ['Target phase transitions', 'Use transport dynamics'],
+            'blue_team': ['Monitor transport operators', 'Detect phase disruptions']
+        },
+        metadata={'source': 'Neural Transport Dynamics 2024'}
+    )
+}
+
+print('🎯 Creating comprehensive security dashboard...')
+
+# Create comprehensive report
+output_path = create_comprehensive_report(attack_data, detection_results, '$OUTPUT_DIR')
+
+print(f'✅ Dashboard created successfully!')
+print(f'📊 Reports saved to: {output_path}')
+print(f'📁 Files generated:')
+print(f'   • comprehensive_dashboard.png')
+print(f'   • red_team_dashboard.png')
+print(f'   • blue_team_dashboard.png')
+print(f'   • attack_timeline.png')
+print(f'   • security_analysis_report.md')
+"
+    
+    echo ""
+    echo -e "${GREEN}✅ Security dashboard created successfully!${NC}"
+    echo -e "${GREEN}📊 Open the PNG files to view the dashboards${NC}"
+}
+
+# Function to run security tests
+run_security_tests() {
+    echo -e "${BLUE}🧪 Running Security Module Tests${NC}"
+    echo -e "${BLUE}=================================${NC}"
+    echo ""
+    
+    cd "$NEURINSPECTRE_DIR"
+    $PYTHON_CMD testing_suite/security/test_security_modules.py
+}
+
+# Parse command line arguments
+COMMAND=""
+DATA_FILE=""
+REFERENCE_FILE=""
+NETWORK_DATA=""
+WEBHOOK_URL=""
+MONITOR_INTERVAL=60
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        help|--help|-h)
+            show_help
+            exit 0
+            ;;
+        detect-adversarial|detect-evasion|scan-comprehensive|monitor-realtime|generate-attacks|create-dashboard|test-security)
+            COMMAND="$1"
+            if [[ $# -gt 1 && ! "$2" =~ ^-- ]]; then
+                DATA_FILE="$2"
+                shift
+            fi
+            shift
+            ;;
+        --output-dir)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --threshold)
+            THRESHOLD="$2"
+            shift 2
+            ;;
+        --parallel)
+            PARALLEL=true
+            shift
+            ;;
+        --reference)
+            REFERENCE_FILE="$2"
+            shift 2
+            ;;
+        --network-data)
+            NETWORK_DATA="$2"
+            shift 2
+            ;;
+        --webhook)
+            WEBHOOK_URL="$2"
+            shift 2
+            ;;
+        --interval)
+            MONITOR_INTERVAL="$2"
+            shift 2
+            ;;
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        *)
+            echo -e "${RED}❌ Unknown option: $1${NC}"
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+# Execute command
+case $COMMAND in
+    detect-adversarial)
+        if [[ "$DATA_FILE" == "" ]]; then
+            echo -e "${RED}❌ Error: Data file required for adversarial detection${NC}"
+            echo -e "${YELLOW}Usage: neurinspectre-security detect-adversarial <data_file>${NC}"
+            exit 1
+        fi
+        run_adversarial_detection "$DATA_FILE"
+        ;;
+    detect-evasion)
+        if [[ "$DATA_FILE" == "" ]]; then
+            echo -e "${RED}❌ Error: Data file required for evasion detection${NC}"
+            echo -e "${YELLOW}Usage: neurinspectre-security detect-evasion <data_file>${NC}"
+            exit 1
+        fi
+        run_evasion_detection "$DATA_FILE"
+        ;;
+    scan-comprehensive)
+        if [[ "$DATA_FILE" == "" ]]; then
+            echo -e "${RED}❌ Error: Data file required for comprehensive scan${NC}"
+            echo -e "${YELLOW}Usage: neurinspectre-security scan-comprehensive <data_file>${NC}"
+            exit 1
+        fi
+        run_comprehensive_scan "$DATA_FILE"
+        ;;
+    monitor-realtime)
+        if [[ "$DATA_FILE" == "" ]]; then
+            echo -e "${RED}❌ Error: Data directory required for real-time monitoring${NC}"
+            echo -e "${YELLOW}Usage: neurinspectre-security monitor-realtime <data_directory>${NC}"
+            exit 1
+        fi
+        run_realtime_monitoring "$DATA_FILE"
+        ;;
+    generate-attacks)
+        generate_attack_data
+        ;;
+    create-dashboard)
+        create_dashboard
+        ;;
+    test-security)
+        run_security_tests
+        ;;
+    "")
+        echo -e "${RED}❌ Error: No command specified${NC}"
+        show_help
+        exit 1
+        ;;
+    *)
+        echo -e "${RED}❌ Error: Unknown command: $COMMAND${NC}"
+        show_help
+        exit 1
+        ;;
+esac 

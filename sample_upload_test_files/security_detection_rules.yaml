@@ -1,0 +1,40 @@
+metadata:
+  author: packetmaven
+  version: '1.0'
+rules:
+- category: execution
+  description: Detects suspicious PowerShell execution
+  detection:
+    condition: selection
+    selection:
+      command_line:
+      - '*-EncodedCommand*'
+      - '*-WindowStyle Hidden*'
+      - '*-ExecutionPolicy Bypass*'
+      process_name: powershell.exe
+  false_positives:
+  - Legitimate administrative scripts
+  - Software deployment tools
+  id: rule_001
+  mitre_technique: T1059.001
+  name: Detect PowerShell Execution
+  severity: high
+- category: network
+  description: Detects connections to known C2 servers
+  detection:
+    condition: selection
+    selection:
+      destination_ip:
+      - 192.168.1.100
+      - 10.0.0.50
+      destination_port:
+      - 443
+      - 80
+      - 8080
+  false_positives:
+  - Legitimate web traffic
+  - CDN connections
+  id: rule_002
+  mitre_technique: T1071.001
+  name: Suspicious Network Connection
+  severity: critical

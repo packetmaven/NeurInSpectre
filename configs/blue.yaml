@@ -1,0 +1,19 @@
+profile: blue
+monitoring:
+  attention_guard: true
+  anomaly_threshold: 0.8
+  realtime: true
+adversarial:
+  ts_inverse_threshold: 0.8
+evasion:
+  time_window: 100
+  demarking_threshold: 0.6
+threat_threshold: 0.6
+parallel_processing: true
+max_workers: 4
+outputs:
+  artifacts_dir: artifacts/blue
+  visuals: true
+  json_reports: true
+
+

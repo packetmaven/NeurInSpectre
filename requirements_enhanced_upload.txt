@@ -1,0 +1,17 @@
+# Enhanced Upload System Requirements
+# Core dependencies
+dash>=2.14.0
+dash-bootstrap-components>=1.5.0
+plotly>=5.15.0
+pandas>=1.5.0
+numpy>=1.24.0
+
+# Industry-standard format support
+pyyaml>=6.0          # YAML configuration files
+h5py>=3.8.0          # HDF5 scientific datasets
+lxml>=4.9.0          # XML processing for STIX 1.x
+python-stix2>=3.0.0  # STIX 2.1 validation (optional)
+
+# Additional security libraries (optional)
+cryptography>=41.0.0  # For encrypted data handling
+requests>=2.31.0      # For TAXII protocol support
