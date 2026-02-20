@@ -64,7 +64,7 @@ dependencies = [
     "dash-html-components==2.0.0",
     "dash-table==5.0.0",
     "dash-bootstrap-components>=1.4.0",
-    "flask<3.1",
+    "flask<3.2",
     "werkzeug<3.1",
     "click>=8.1.0",
     "rich>=13.7.0",

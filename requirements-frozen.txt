@@ -23,7 +23,7 @@ ember @ git+https://github.com/elastic/ember.git@d97a0b523de02f3fe5ea6089d080aba
 exceptiongroup==1.3.1
 executing==2.2.1
 filelock==3.20.0
-Flask==3.0.3
+Flask==3.1.3
 flatbuffers==25.12.19
 fonttools==4.61.0
 fsspec==2025.10.0
