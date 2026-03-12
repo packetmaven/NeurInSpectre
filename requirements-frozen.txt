@@ -60,7 +60,7 @@ numba==0.62.1
 numpy==1.26.4
 onnxruntime==1.23.2
 opencv-contrib-python-headless==4.8.1.78
-orjson==3.11.4
+orjson==3.11.6
 packaging==25.0
 pandas==2.3.3
 parso==0.8.5
