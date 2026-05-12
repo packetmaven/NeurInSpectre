@@ -110,7 +110,7 @@ transformers==4.57.3
 typing_extensions==4.15.0
 tzdata==2025.2
 umap-learn==0.5.9.post2
-urllib3==2.5.0
+urllib3==2.7.0
 wcwidth==0.2.14
 Werkzeug==3.0.6
 widgetsnbextension==4.0.15
