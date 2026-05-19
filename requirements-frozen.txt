@@ -30,7 +30,7 @@ fsspec==2025.10.0
 hf-xet==1.2.0
 huggingface-hub==0.36.0
 humanfriendly==10.0
-idna==3.11
+idna==3.15
 ImageIO==2.37.2
 importlib_metadata==8.7.0
 iniconfig==2.3.0
