@@ -115,8 +115,7 @@ Traditional blue teams monitor API calls and output statistics. NeurInSpectre en
 - [The Solution: NeurInSpectre](#the-solution-neurinspectre)
 - [What Makes NeurInSpectre Different](#what-makes-neurinspectre-different)
 - [Why This Matters](#why-this-matters)
-- [Reproduction Artifacts](#reproduction-artifacts) (offensive + detection lanes)
-  - [Malware ML — same-sample PE audit](#malware-ml-same-sample-audit)
+- [Malware ML — same-sample PE audit](#malware-ml-same-sample-audit)
 - [References](#references)
 
 ### **🚀 Getting Started**
@@ -224,7 +223,7 @@ Traditional blue teams monitor API calls and output statistics. NeurInSpectre en
   - [Section 3 - Compare Modes](#section-3--compare-modes-output)
   - [Section 3 - Compare Modes (Real Output)](#section-3--compare-modes-real-output)
   - [Section 4 - Signal-to-Action Mapping (Evaluation/Regression)](#section-4--signal-to-action-mapping-evaluation-regression)
-  - [Section 5 - WOOT AEC Compliance](#section-5--woot-aec-compliance)
+  - [Section 5 - Reproducibility and Reuse](#section-5--reproducibility-and-reuse)
 - [AttentionGuard transformer anomaly analysis](#attentionguard-transformer-anomaly-analysis)
 - [Installation & Environment](#installation-environment)
 - [Latest AI Security Research Integration](#latest-ai-security-research-integration)
@@ -263,62 +262,9 @@ Built for red teams, blue teams, and security researchers, it integrates cutting
 
 ---
 
-<a id="reproduction-artifacts"></a>
-
-## 🧪 Reproduction Artifacts
-
-NeurInSpectre ships with two independently reproducible experiment lanes: an
-**offensive** lane (12-defense evasion matrix + subnetwork hijack) and a
-**detection** lane (three-layer characterization on synthetic + real
-defenses). Each lane has its own one-command harness; you can run either
-without touching the other.
-
-### Offensive lane — 12-defense evasion matrix + subnetwork hijack
-
-| Claim | Status | Entry point | Output (under `results/`) |
-|---|---|---|---|
-| **Table 8** — 12 defenses × 3 attacks; **+17.0 pp NeurInSpectre vs. AutoAttack** on the validity-passed subset | measured (prior artifact) | `bash scripts/reproduce_table8.sh` | `table8_run_v2/summary.json` (+ `sha256_manifest.txt`, `table10_attack_strength.{json,tex}`) |
-| **Table 5** — subnetwork hijack on WRN-28-10; last-Linear protocol evades Neural Cleanse + STRIP at paper-recommended thresholds | measured | `python scripts/reproduce_module_table5.py --n-seeds 3 --baseline` | `table5_rigor_production/results.json` |
-| **EMBER 2024 same-sample PE audit** (thrember v3, dim 2568, pefile) — feature vs Full DOS + padding | measured (new) | `neurinspectre audit --target ember2024-gbdt --pe-sample /pe --require-detected --require-official-reproduction` | `results/ember2024/audit_*/audit_report.json` |
-| **Table 4** — gradient inversion | design-target (script runs; headline SSIM does not reproduce end-to-end) | `python scripts/reproduce_module_table4.py` | (script header) |
-| Statistical evasion / RL-obfuscation / attention security / EDNN / activation steganography | design-target (CLIs ship + run end-to-end; paper headlines do not reproduce) | per-module `neurinspectre …` CLIs | `results/audit_cli/` |
-
-Each row is transparently flagged as measured or design-target — see
-`DRAFT_CODE_AUDIT.md` for the full claim → code → command → artifact
-mapping.
-
-**Headline numbers from `results/table8_run_v2/summary.json`** (single
-seed=42, n=1000 per row, A100 / CUDA 12.1 / PyTorch 2.10.0). This artifact
-was produced by an earlier run and is preserved rather than regenerated:
-
-| Defense | Clean | PGD-20 | AutoAttack | NeurInSpectre | Validity |
-|---|---:|---:|---:|---:|:---:|
-| JPEG Compression (CIFAR-10) | 79.6% | 9.3% | 98.4% | **99.5%** | ✓ |
-| Bit-Depth Reduction (CIFAR-10) | 88.5% | 9.4% | 99.0% | **100.0%** | ✓ |
-| Ensemble Diversity (CIFAR-10) | 91.9% | 6.2% | 33.5% | **100.0%** | ✓ |
-| Spatial Smoothing (nuScenes) | 55.0% | 93.2% | 100.0% | 87.0% | ✓ |
-| Random Pad/Crop (nuScenes) | 62.5% | 44.0% | 100.0% | **100.0%** | ✓ |
-| Thermometer Encoding (nuScenes) | 65.0% | 11.5% | 19.2% | **100.0%** | ✓ |
-| EMBER Gradient Reg. (MLP) | 70.9% | 0.0% | 0.0% | 0.0% | ✓ |
-| EMBER Defensive Distillation (MLP) | 70.9% | 0.0% | 0.0% | 0.0% | ✓ |
-| **Mean (validity-passed, 8/12)** | — | **21.7%** | **56.3%** | **73.3%** | — |
-
-The two EMBER 0% rows are the **MLP** row from Table 8; do **not** conflate
-them with the official Elastic EMBER 2018 LightGBM audit (see the
-[Malware ML same-sample audit](#malware-ml-same-sample-audit) section
-below). Subnetwork hijacking on WRN-28-10 (last-Linear protocol, 3 seeds,
-from `results/table5_rigor_production/results.json`):
-
-- 6%-subnet, production hyperparameters: BD ASR **24.7%**, ΔAcc −18.9 pp,
-  Neural Cleanse anomaly **1.43** (threshold 2.0, not fired),
-  STRIP triggered-flag **37.5%** (threshold 85%, not fired).
-- BadNets baseline: BD ASR 23.6%, NC 1.76, STRIP 38.0%.
-- Default script flags (`epochs=3`, poison=0.1, n_train=2000) reproduce
-  only ~3.5% BD ASR; use `epochs=8, poison=0.25, n_train=4000` for the
-  production row. Reported std across seeds is 0 (identical BD ASR at
-  every seed); this is **not** a 3-draw confidence interval.
-
 <a id="malware-ml-same-sample-audit"></a>
+
+## Malware ML — same-sample PE audit
 
 **Malware ML — same-sample PE audit.** Two Elastic-lineage detectors are
 first-class targets. Public EMBER releases (2018 and 2024) do not ship PE
@@ -372,62 +318,11 @@ the same corpus: the models see different files (2018 detected 56/148 on
 the reference corpus, 2024 detected 97/102 parseable) and have different
 extractor failure modes.
 
-### Detection lane — three-layer characterization
-
-| Claim | Status | Entry point | Output (under `results/detection/`) |
-|---|---|---|---|
-| **Tables 1–4** — synthetic calibration sequences (Layer 1 spectral, Layer 2 Volterra, Layer 3 Krylov sweep) | measured | `python scripts/run_synthetic_experiments.py --output-dir results/detection` | `synthetic_experiments.json` |
-| **Table 5** — real CIFAR-10 defenses on Carmon2019 WRN-28-10 (clean / JPEG / rand-smoothing / spatial-smoothing) | measured | `python scripts/run_real_defense_experiments.py --output-dir results/detection` | `real_defense_characterization.json` |
-| **Figure 4** — dissipative Laplacian 3-panel | measured | `python scripts/LaPlacian.py` | `figures/laplacian_dissipative_3panel.png` |
-| Figures 1–3, 5–8 | static assets | (none) | `figures/*.png` (vendored) |
-
-End-to-end one-command run: `bash scripts/reproduce_detection.sh`.
-
-**Headline numbers from `results/detection/real_defense_characterization.json`**
-(200-step PGD on Carmon2019Unlabeled WRN-28-10, ε=8/255; 89.69% verified
-clean accuracy of the backbone):
-
-| Defense | Ĥ_S | R_HF | α̂ | Krylov err. | Composite verdict | Routed bypass |
-|---|---:|---:|---:|---:|---|---|
-| None (clean baseline) | 0.084 | 0.000 | 0.11 | 0.67 | obfuscated† | none via α̂ |
-| JPEG (q=75) | 0.371 | 0.078 | 0.10 | 0.67 | obfuscated | shattered (grad-zero) |
-| Randomized smoothing (σ=0.25) | 0.001 | 0.000 | 0.10 | 0.31 | obfuscated | stochastic (variance) |
-| Spatial smoothing (3×3, σ=1) | 0.004 | 0.001 | 0.10 | 0.37 | obfuscated† | none via α̂ |
-
-†The composite verdict fires on the clean baseline because the L-BFGS-B
-Volterra fit collapses to the box-constraint boundary
-`α̂ = 0.10 < 0.70` on this backbone (a known degeneracy). Treat this as
-the transfer gap; the autocorrelation-slope estimator in Table 3 is the
-degeneracy-free replacement.
-
-### Provenance and integrity
-
-- TorchScript model files under `models/` carry `.meta.json` sidecars with
-  SHA-256 hashes; the offensive reproduction harness emits a recursive
-  `sha256_manifest.txt` covering every JSON / log / YAML / tex output.
-- The Carmon2019 checkpoint used by the detection lane is fetched by
-  `scripts/download_carmon2019.py` with SHA-256 verification against the
-  RobustBench mirror (~146 MB).
-
-### What is not shipped (and why)
-
-- **Standard benchmark datasets.** CIFAR-10 is auto-downloaded by
-  torchvision; EMBER 2018 (license-restricted archive) and nuScenes v1.0-mini
-  (account-gated) are downloaded manually — see `REPRODUCE.md`.
-- **An ImageNet-100 trained checkpoint.** `models/imagenet100_resnet50.pt`
-  is explicitly a stub (`"is_stub": true` in its `.meta.json`); Table 8
-  excludes ImageNet-100 for this reason.
-- **Live malware samples.** PE binaries are never committed. The
-  same-sample EMBER audit is opt-in via `--pe-sample /your/dir`.
-
-### 5-minute smoke tests
+PE binaries are never committed. The same-sample audit is opt-in via
+`--pe-sample /your/dir`.
 
 ```bash
-# Table 2 wiring smoke (JPEG + EMBER routing)
 neurinspectre table2-smoke --output-dir results/smoke
-
-# Detection lane synthetic-only smoke
-python scripts/run_synthetic_experiments.py --output-dir results/smoke_detection
 ```
 
 ---
@@ -2078,7 +1973,7 @@ parametric $N(u,t)$** for "RL-trained" or "stochastic" obfuscation:
 
 - Real defenses (and RL-trained evasion policies) are generally **state-dependent**
   and can be **aperiodic**; a fixed $\sin(2\pi t)$ model is at best didactic.
-- For WOOT/AE defensibility, the repo treats "RL-trained"/"stochastic"/"shattered"
+- The repo treats "RL-trained"/"stochastic"/"shattered"
   as **measurement-driven hypotheses** supported by multiple observable signals.
 
 **Implementation (measurement-driven characterization + attack adaptation):**
@@ -2798,12 +2693,12 @@ Baseline comparisons require an external expected-ASR file (not stored in-repo).
 | `delta` (compare: runs) | >= `--threshold` | Regression vs prior run | Flag CI/CD, investigate config/model drift |
 | `delta` (compare: baseline) | outside tolerance | Divergence vs expected baseline file | Re-check config + dataset parity |
 
-<a id="section-5--woot-aec-compliance"></a>
+<a id="section-5--reproducibility-and-reuse"></a>
 
-#### Section 5 - WOOT AEC Compliance (Reproducibility and Reuse)
+#### Section 5 - Reproducibility and Reuse
 
 **Baseline policy**  
-- This repo intentionally does not ship paper baselines or expected ASR numbers.  
+- This repo intentionally does not ship expected ASR numbers.  
 - For validation, supply expected values via external files (`--expected-asr-path`, `baseline_validation.expected_asr_path`).
 
 **Completeness**  
