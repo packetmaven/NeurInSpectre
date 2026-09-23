@@ -270,9 +270,12 @@ Engagements often ask whether a sample **still runs** and whether a **deployed
 detector** missed it. NeurInSpectre answers a narrower question: a **named
 LightGBM checkpoint**, on **named byte ranges** (Full DOS / overlay / optional
 section-slack), under a **PE parse gate**, at a stated **query budget**. Audit
-reports include a `measurement_scope` block that states what is *not* measured
-(sandbox execution, commercial AV/EDR, GAMMA section injection, graph/byte
-models). Both frames can be honest; only the second is what this CLI produces.
+reports include a `measurement_scope` block: default **not measured** items
+include sandbox execution, commercial AV/EDR, GAMMA section injection,
+import-table edits, and graph/byte models. Optional flags record what you
+actually ran (`--enable-gamma-sections`, `--enable-iat-edits`) under
+`measured` without claiming sandbox or live AV. Both engagement frames can be
+honest; only the GBDT audit frame is what this CLI produces.
 
 **Malware ML — same-sample PE audit.** Two Elastic-lineage detectors are
 first-class targets. Public EMBER releases (2018 and 2024) do not ship PE
@@ -292,6 +295,24 @@ python scripts/diagnose_ember_audit.py results/audit_<run>
 
 `audit_report.json` includes `measurement_scope` and `pipeline` (problem-space only for GBDT).
 `--crossing-matrix` scores best bytes on EMBER2018 + 2024 PE/Win32/Win64 when checkpoints exist.
+
+**Operator bundle (scope → audit → diagnosis → crossing → zip):**
+
+```bash
+neurinspectre redteam-bundle /client/malware_pe -o results/audit/bundle \
+  --target ember2024-gbdt --require-detected \
+  --query-budgets 10,50,100,500,5000
+```
+
+By default the bundle writes `pe_scope.json`, builds a read-only `vt_sidecar.json`
+(challenge JSONL SHA lookup; no live VirusTotal submit), runs audit with
+`--save-best-bytes` and crossing, and zips artifacts. Optional:
+`--enable-iat-edits`, `--enable-gamma-sections` (requires `pip install -e '.[gamma]'`),
+`--sow-adapter sandbox_handoff` (copies `best_bytes` only; does not execute samples).
+
+**Optional audit flags:** `--vt-sidecar`, `--enable-iat-edits` (API import-name edits;
+run `neurinspectre iat-probe <pe>` first), `--write-diagnosis`,
+`--sow-adapter commercial_av_edr` (provenance JSON only; requires `--sow-adapter-ack`).
 
 *EMBER 2018 LightGBM (`ember_model_2018.txt`, dim 2381, LIEF-based v2
 extractor)*
@@ -369,7 +390,7 @@ neurinspectre table2-smoke --output-dir results/smoke
 #### **Option 1: Quick Install (Recommended)**
 ```bash
 # From a clone or a snapshot archive
-git clone https://github.com/packetmaven/NeurInSpectre.git
+git clone https://github.com/packetmaven/Neurinspectre.git
 cd NeurInSpectre
 
 # Create virtual environment
@@ -400,7 +421,7 @@ neurinspectre --help
 ### Installation
 
 ```bash
-git clone https://github.com/packetmaven/NeurInSpectre.git
+git clone https://github.com/packetmaven/Neurinspectre.git
 cd NeurInSpectre
 pip install -e ".[dev]"
 
