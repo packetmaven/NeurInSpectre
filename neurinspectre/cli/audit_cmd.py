@@ -983,9 +983,12 @@ def run_audit(ctx: click.Context, **kwargs: Any) -> None:
     click.echo(f"[audit] report written to {report_path}")
 
     if _is_ember_target(report.get("target") or "") and report.get("measurement_scope"):
+        from ..malware.measurement_scope import not_measured_ids
+
+        gap_ids = ",".join(not_measured_ids())
         click.echo(
             "[audit] measurement_scope: named LightGBM + parse gate + query budget "
-            "(not sandbox / AV / section-injection SOW)"
+            f"(engagement gaps not measured: {gap_ids})"
         )
 
     if bool(kwargs.get("crossing_matrix")):

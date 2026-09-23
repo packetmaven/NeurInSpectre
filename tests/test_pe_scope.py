@@ -53,3 +53,6 @@ def test_scope_pe_corpus_counts_mz(tmp_path):
     assert out["n_mz_files"] == 1
     assert len(out["files"]) == 1
     assert len(out["files"][0]["sha256"]) == 64
+    pre = out.get("measurement_scope_preflight") or {}
+    assert pre.get("not_measured_ids")
+    assert "sandbox_execution" in pre["not_measured_ids"]

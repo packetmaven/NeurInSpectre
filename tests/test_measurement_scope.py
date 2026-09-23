@@ -2,19 +2,38 @@
 
 from neurinspectre.cli.audit_cmd import build_audit_report, characterize_audit_pipeline
 from neurinspectre.malware.measurement_scope import (
+    CLIENT_ENGAGEMENT_GAP_IDS,
     NOT_MEASURED,
     build_measurement_scope,
+    engagement_gaps_summary,
     enrich_gbdt_pipeline_characterization,
+    not_measured_ids,
 )
 
 
 def test_measurement_scope_lists_five_engagement_gaps():
     scope = build_measurement_scope("ember2024-gbdt")
     ids = {row["id"] for row in NOT_MEASURED}
+    assert ids == set(CLIENT_ENGAGEMENT_GAP_IDS)
     assert "sandbox_execution" in ids
     assert "commercial_av_or_edr" in ids
     assert "gamma_section_injection" in ids
+    assert "import_table_edits" in ids
+    assert "graph_or_byte_model_evasion" in ids
+    assert scope["not_measured_ids"] == not_measured_ids()
     assert scope["frame"] == "named_model_byte_range_parse_gate_query_budget"
+    assert "cli_policy" in scope
+
+
+def test_engagement_gaps_cli_command():
+    from click.testing import CliRunner
+    from neurinspectre.cli.main import cli
+
+    summary = engagement_gaps_summary()
+    r = CliRunner().invoke(cli, ["engagement-gaps"])
+    assert r.exit_code == 0
+    assert "sandbox_execution" in r.output
+    assert summary["policy"] in r.output
 
 
 def test_ember_pipeline_characterization_is_problem_space_only():

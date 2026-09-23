@@ -69,4 +69,10 @@ A finding requires: clean `p ≥ 0.5`, bytes changed, mutated `p < 0.5` on the n
 
 - Sandbox execution or commercial AV success inferred from GBDT JSON alone.
 - GAMMA section injection, IAT rewrites, or graph-model evasion from this audit path.
+
+Gap ids are explicit on each report (`measurement_scope.not_measured_ids`). Preflight:
+
+```bash
+neurinspectre engagement-gaps
+```
 - Crossing matrix **0/N** as multi-detector evasion without per-model clean scores.

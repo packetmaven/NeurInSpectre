@@ -297,6 +297,7 @@ def _audit_readiness() -> Dict[str, Any]:
             "capa_diff": "neurinspectre capa-diff-audit <audit_dir>/audit_report.json",
             "diagnose": "neurinspectre diagnose-ember-audit <audit_dir>",
             "pipeline_info": "neurinspectre ember-pipeline-info --target ember2024-gbdt",
+            "engagement_gaps": "neurinspectre engagement-gaps",
         },
     }
 
@@ -466,6 +467,7 @@ def run_doctor(ctx: click.Context, **kwargs: Any) -> None:
                 "capa_diff",
                 "diagnose",
                 "pipeline_info",
+                "engagement_gaps",
             ):
                 if frame.get(key):
                     click.echo(f"  {key}: {frame[key]}")

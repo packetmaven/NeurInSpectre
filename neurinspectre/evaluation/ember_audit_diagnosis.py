@@ -88,6 +88,7 @@ def summarize_ember_audit_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "extractor_status": (same.get("extractor") or {}).get("shims"),
         "query_curve": (problem.get("query_curve") if isinstance(problem, dict) else None),
         "measurement_scope": report.get("measurement_scope"),
+        "not_measured_ids": (report.get("measurement_scope") or {}).get("not_measured_ids"),
         "closest_still_malicious": (
             closest
             if closest and float(closest.get("best", 1.0)) >= 0.5

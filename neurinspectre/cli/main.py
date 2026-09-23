@@ -56,6 +56,7 @@ _CLICK_COMMANDS = {
     "scope-pe-corpus",
     "capa-diff-audit",
     "ember-pipeline-info",
+    "engagement-gaps",
 }
 
 
@@ -2403,6 +2404,24 @@ def capa_diff_audit_cmd(report, output, capa_rules_dir, capa_diff_backend, max_s
         f"wrote {out} n_scanned={capa_report.get('n_scanned')} "
         f"errors={capa_report.get('n_errors')}"
     )
+
+
+@cli.command("engagement-gaps")
+@click.option("--json/--no-json", "as_json", default=True, show_default=True,
+              help="Print engagement gap catalog as JSON")
+def engagement_gaps_cmd(as_json):
+    """List SOW boundaries: sandbox, AV/EDR, GAMMA section injection, IAT/graph (not CLI attacks)."""
+    import json as _json
+
+    from neurinspectre.malware.measurement_scope import engagement_gaps_summary
+
+    summary = engagement_gaps_summary()
+    if as_json:
+        click.echo(_json.dumps(summary, indent=2))
+        return
+    click.echo(summary["cli_policy"])
+    for row in summary["not_measured"]:
+        click.echo(f"  - {row['id']}: {row.get('client_question')}")
 
 
 @cli.command("ember-pipeline-info")

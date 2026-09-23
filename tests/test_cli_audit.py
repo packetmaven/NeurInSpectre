@@ -38,6 +38,7 @@ def test_measurement_frame_commands_registered():
         "diagnose-ember-audit",
         "capa-diff-audit",
         "ember-pipeline-info",
+        "engagement-gaps",
     ):
         assert name in _CLICK_COMMANDS
 

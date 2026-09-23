@@ -162,7 +162,13 @@ On the reference 148-file corpus, a recent smoke with `--query-budgets 10,50` on
 
 **Client takeaway:** feature-space ASR is not a PE-valid red-team finding. A parse-valid ASR of zero with documented closest approach is a defensible result. Do not conflate with “Defender missed it” unless the SOW includes that system.
 
-**Out of scope unless the SOW explicitly adds another tool:** GAMMA **section** injection, import-table rewrites, dummy call-site / graph-model attacks, sandbox “still executes,” commercial AV/EDR scoring, PyRIT attack-planning.
+**Engagement gaps (documented, not CLI attack primitives):** GAMMA **section** injection, import-table / IAT rewrites, dummy call-site / graph-model attacks, sandbox “still executes,” commercial AV/EDR scoring. Every EMBER `audit_report.json` stamps these under `measurement_scope.not_measured`. Operator catalog:
+
+```bash
+neurinspectre engagement-gaps
+```
+
+PyRIT attack-planning remains out of scope unless the SOW adds it separately.
 
 ## Engagement 3 — last-layer supply-chain / fine-tune hijack (medium confidence)
 
