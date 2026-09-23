@@ -14,12 +14,20 @@ from .base_interface import AttackConfig, AttackResult, PGDAttack, PGDWithRestar
 from .pgd import PGD
 from .apgd import APGD
 from .fab import FAB, FABEnsemble
-from .square import SquareAttack
+from .square import SquareAttack, SquareAttackL2
+from .feature_square import FeatureSquareAttack
 from .bpda import BPDA
 from .eot import EOT, AdaptiveEOT
 from .ma_pgd import MAPGD
 from .autoattack import AutoAttack
 from .hybrid import HybridBPDAEOT, HybridBPDAEOTVolterra
+from .official_aa import (
+    BPDAWrappedModel,
+    IdentityDefenseAdapter,
+    build_official_autoattack,
+    is_gradient_unavailable_error,
+    run_official_autoattack,
+)
 from ..characterization.defense_analyzer import DefenseAnalyzer, ObfuscationType
 
 logger = logging.getLogger(__name__)
@@ -94,7 +102,7 @@ def _to_attack_config(config: Optional[Dict[str, Any]] | AttackConfig) -> Attack
         kappa=float(config.get("kappa", config.get("cw_kappa", 0.0))),
         use_tg=use_tg_value,
         use_bpda=bool(config.get("use_bpda", False)),
-        bpda_approximation=str(config.get("bpda_approximation", "identity")),
+        bpda_approximation=str(config.get("bpda_approximation", "defense")),
         use_eot=bool(config.get("use_eot", False)),
         eot_samples=int(eot_samples),
         eot_importance_weighted=bool(eot_weighted),
@@ -130,9 +138,11 @@ def _resolve_base_model(model, defense):
 
 def _resolve_bpda_approximation(defense, cfg: AttackConfig):
     approx_fn = defense.get_bpda_approximation()
-    mode = str(getattr(cfg, "bpda_approximation", "identity")).lower()
+    mode = str(getattr(cfg, "bpda_approximation", "defense")).lower()
     if mode in {"identity", "id"}:
         return lambda x: x
+    if mode in {"defense", "auto", "default"}:
+        return approx_fn
     return approx_fn
 
 
@@ -165,8 +175,36 @@ class AttackFactory:
             return _APGDAttackRunner(model, cfg, device=device, raw_config=config)
         if attack_type == "autoattack":
             return _AutoAttackRunner(model, cfg, device=device, raw_config=config)
+        if attack_type in {"aa_official", "official_autoattack", "autoattack_official"}:
+            return _OfficialAutoAttackRunner(model, cfg, device=device, raw_config=config)
+        if attack_type in {"aa_bpda", "autoattack_bpda", "aa_official_bpda"}:
+            return _AABPDARunner(model, cfg, defense=defense, device=device, raw_config=config)
         if attack_type == "square":
             return _SquareAttackRunner(model, cfg, device=device, raw_config=config)
+        raw_cfg = dict(config) if isinstance(config, dict) else {}
+        if attack_type in {"scores", "square_scores"}:
+            raw = dict(raw_cfg)
+            raw.setdefault("loss_type", "margin")
+            raw.setdefault("access", "scores")
+            n_q = int(raw.get("n_queries", 5000))
+            if n_q < 1000:
+                raw.setdefault("allow_short_budget", True)
+            return _SquareAttackRunner(model, cfg, device=device, raw_config=raw)
+        if attack_type in {"labels", "square_labels"}:
+            raw = dict(raw_cfg)
+            raw["loss_type"] = "label"
+            raw.setdefault("access", "labels")
+            n_q = int(raw.get("n_queries", 5000))
+            if n_q < 1000:
+                raw.setdefault("allow_short_budget", True)
+            return _SquareAttackRunner(model, cfg, device=device, raw_config=raw)
+        if attack_type in {"feature_square", "square_features"}:
+            raw = dict(raw_cfg)
+            raw.setdefault("access", "scores")
+            n_q = int(raw.get("n_queries", 5000))
+            if n_q < 1000:
+                raw.setdefault("allow_short_budget", True)
+            return _FeatureSquareRunner(model, cfg, device=device, raw_config=raw)
         if attack_type == "fab":
             return _FABAttackRunner(model, cfg, device=device, raw_config=config)
         if attack_type == "mapgd":
@@ -307,6 +345,16 @@ class _PGDAttackRunner(_BaseRunner):
         )
         preds = self._predict(result.x_adv)
         result.predictions = preds
+        probe = x[:1].detach().requires_grad_(True)
+        try:
+            logits = self.model(probe)
+            no_grad = not torch.is_tensor(logits) or not bool(getattr(logits, "requires_grad", False))
+        except Exception:
+            no_grad = True
+        if no_grad:
+            result.metadata = dict(result.metadata or {})
+            result.metadata["gradient_unavailable"] = True
+            result.metadata["chosen_attack"] = "pgd"
         return result
 
 
@@ -380,21 +428,174 @@ class _AutoAttackRunner(_BaseRunner):
         x_adv, metrics = self.attack.run(x, y, verbose=False)
         preds = self._predict(x_adv)
         success = preds != y
-        return AttackResult(x_adv=x_adv, predictions=preds, success_mask=success, metadata={"autoattack": metrics})
+        metadata = {"autoattack": metrics, "backend": "inrepo"}
+        metadata.update({k: metrics[k] for k in (
+            "aa_subattacks_skipped",
+            "aa_skip_reasons",
+            "gradient_unavailable",
+            "aa_all_gradient_skipped",
+        ) if k in metrics})
+        return AttackResult(x_adv=x_adv, predictions=preds, success_mask=success, metadata=metadata)
+
+
+class _OfficialAutoAttackRunner(_BaseRunner):
+    def __init__(self, model, cfg: AttackConfig, device: str = "cpu", raw_config: Optional[Dict[str, Any]] = None):
+        raw_config = raw_config or {}
+        self.cfg = cfg
+        self._raw_config = dict(raw_config)
+        self._device = device
+        adversary = build_official_autoattack(
+            model,
+            norm=cfg.norm,
+            eps=cfg.epsilon,
+            version=str(raw_config.get("version", "standard")),
+            device=device,
+            raw_config=raw_config,
+        )
+        super().__init__(model, adversary)
+        self.chosen_attack = "aa_official"
+        self.selected_attack_impl = "official.AutoAttack"
+
+    def run(self, x: torch.Tensor, y: torch.Tensor) -> AttackResult:
+        skipped = []
+        try:
+            x_adv = run_official_autoattack(self.attack, x, y, batch_size=self.cfg.batch_size)
+        except RuntimeError as exc:
+            if not is_gradient_unavailable_error(exc):
+                raise
+            logger.warning(
+                "Official AutoAttack skipped: gradient unavailable on this defense (%s)",
+                exc,
+            )
+            x_adv = x
+            skipped = list(self._raw_config.get("attacks_to_run") or ["apgd-ce", "apgd-t", "fab", "square"])
+        preds = self._predict(x_adv)
+        success = preds != y
+        return AttackResult(
+            x_adv=x_adv,
+            predictions=preds,
+            success_mask=success,
+            metadata={
+                "backend": "fra31",
+                "version": str(self._raw_config.get("version", "standard")),
+                "chosen_attack": "aa_official",
+                "selected_attack_impl": "official.AutoAttack",
+                "aa_subattacks_skipped": skipped,
+                "gradient_unavailable": bool(skipped),
+                "aa_all_gradient_skipped": bool(skipped),
+            },
+        )
+
+
+class _AABPDARunner(_BaseRunner):
+    def __init__(
+        self,
+        model,
+        cfg: AttackConfig,
+        defense=None,
+        device: str = "cpu",
+        raw_config: Optional[Dict[str, Any]] = None,
+    ):
+        raw_config = raw_config or {}
+        defense = _resolve_defense(model, defense) or IdentityDefenseAdapter(model)
+        approx_fn = _resolve_bpda_approximation(defense, cfg)
+        wrapped = BPDAWrappedModel(defense, approx_fn=approx_fn)
+        wrapped.eval()
+        self.cfg = cfg
+        self._raw_config = dict(raw_config)
+        self._device = device
+        backend = str(raw_config.get("backend", "official")).lower()
+        if backend in {"inrepo", "in-repo", "internal"}:
+            adversary = AutoAttack(
+                wrapped,
+                norm=cfg.norm,
+                eps=cfg.epsilon,
+                version=str(raw_config.get("version", "standard")),
+                device=device,
+            )
+            self._backend = "inrepo"
+        else:
+            adversary = build_official_autoattack(
+                wrapped,
+                norm=cfg.norm,
+                eps=cfg.epsilon,
+                version=str(raw_config.get("version", "standard")),
+                device=device,
+                raw_config=raw_config,
+            )
+            self._backend = "fra31"
+        super().__init__(wrapped, adversary, eval_model=defense)
+        self.chosen_attack = "aa_bpda"
+        self.selected_attack_impl = f"{self._backend}.AutoAttack+BPDA"
+
+    def run(self, x: torch.Tensor, y: torch.Tensor) -> AttackResult:
+        if self._backend == "inrepo":
+            x_adv, metrics = self.attack.run(x, y, verbose=False)
+            metadata = {"autoattack": metrics, "backend": "inrepo", "bpda": True}
+            metadata.update({k: metrics[k] for k in (
+                "aa_subattacks_skipped",
+                "aa_skip_reasons",
+                "gradient_unavailable",
+                "aa_all_gradient_skipped",
+            ) if k in metrics})
+        else:
+            try:
+                x_adv = run_official_autoattack(self.attack, x, y, batch_size=self.cfg.batch_size)
+                metadata = {
+                    "backend": "fra31",
+                    "version": str(self._raw_config.get("version", "standard")),
+                    "bpda": True,
+                }
+            except RuntimeError as exc:
+                if not is_gradient_unavailable_error(exc):
+                    raise
+                logger.warning("AA+BPDA official AutoAttack skipped: gradient unavailable (%s)", exc)
+                x_adv = x
+                metadata = {
+                    "backend": "fra31",
+                    "version": str(self._raw_config.get("version", "standard")),
+                    "bpda": True,
+                    "aa_subattacks_skipped": list(self._raw_config.get("attacks_to_run") or ["apgd-ce"]),
+                    "gradient_unavailable": True,
+                    "aa_all_gradient_skipped": True,
+                }
+        preds = self._predict(x_adv)
+        success = preds != y
+        metadata["chosen_attack"] = "aa_bpda"
+        metadata["selected_attack_impl"] = self.selected_attack_impl
+        return AttackResult(x_adv=x_adv, predictions=preds, success_mask=success, metadata=metadata)
 
 
 class _SquareAttackRunner(_BaseRunner):
     def __init__(self, model, cfg: AttackConfig, device: str = "cpu", raw_config: Optional[Dict[str, Any]] = None):
         raw_config = raw_config or {}
-        attack = SquareAttack(
-            model,
-            eps=cfg.epsilon,
-            n_queries=int(raw_config.get("n_queries", 5000)),
-            p_init=float(raw_config.get("p_init", 0.8)),
-            loss_type=str(raw_config.get("loss_type", "margin")),
-            device=device,
-        )
+        n_queries = int(raw_config.get("n_queries", 5000))
+        p_init = float(raw_config.get("p_init", 0.8))
+        allow_short = bool(raw_config.get("allow_short_budget", False))
+        access = str(raw_config.get("access") or "scores")
+        if str(cfg.norm).lower().replace("_", "") in {"l2", "2"}:
+            attack = SquareAttackL2(
+                model,
+                eps=cfg.epsilon,
+                n_queries=n_queries,
+                p_init=p_init,
+                device=device,
+            )
+        else:
+            attack = SquareAttack(
+                model,
+                eps=cfg.epsilon,
+                n_queries=n_queries,
+                p_init=p_init,
+                loss_type=str(raw_config.get("loss_type", "margin")),
+                device=device,
+                allow_short_budget=allow_short,
+            )
         super().__init__(model, attack)
+        self.chosen_attack = "labels" if str(raw_config.get("loss_type", "")).lower() in {"label", "labels", "hard"} else "scores"
+        self.selected_attack_impl = type(attack).__name__
+        self._access = access
+        self._allow_short_budget = allow_short
 
     def run(self, x: torch.Tensor, y: torch.Tensor) -> AttackResult:
         x_adv, stats = self.attack(x, y, targeted=False, verbose=False)
@@ -404,7 +605,57 @@ class _SquareAttackRunner(_BaseRunner):
             x_adv=x_adv,
             predictions=preds,
             success_mask=success,
-            metadata={"queries_used": stats.get("queries_used"), "square": stats},
+            metadata={
+                "queries_used": stats.get("queries_used"),
+                "square": stats,
+                "access": self._access,
+                "allow_short_budget": self._allow_short_budget,
+                "query_floor_relaxed": bool(self._allow_short_budget and self.attack.n_queries < 1000),
+                "chosen_attack": self.chosen_attack,
+                "selected_attack_impl": self.selected_attack_impl,
+            },
+        )
+
+
+class _FeatureSquareRunner(_BaseRunner):
+    def __init__(self, model, cfg: AttackConfig, device: str = "cpu", raw_config: Optional[Dict[str, Any]] = None):
+        raw_config = raw_config or {}
+        n_queries = int(raw_config.get("n_queries", 5000))
+        allow_short = bool(raw_config.get("allow_short_budget", False))
+        attack = FeatureSquareAttack(
+            model,
+            eps=float(raw_config.get("epsilon", cfg.epsilon if cfg.epsilon and cfg.epsilon > 0.1 else 1.0)),
+            n_queries=n_queries,
+            p_init=float(raw_config.get("p_init", 0.1)),
+            loss_type=str(raw_config.get("loss_type", "margin")),
+            device=device,
+            allow_short_budget=allow_short,
+        )
+        super().__init__(model, attack)
+        self.chosen_attack = "feature_square"
+        self.selected_attack_impl = "FeatureSquareAttack"
+        self._allow_short_budget = allow_short
+        self._access = str(raw_config.get("access") or "scores")
+
+    def run(self, x: torch.Tensor, y: torch.Tensor) -> AttackResult:
+        x_adv, stats = self.attack(x, y, targeted=False, verbose=False)
+        preds = self._predict(x_adv)
+        success = preds != y
+        return AttackResult(
+            x_adv=x_adv,
+            predictions=preds,
+            success_mask=success,
+            metadata={
+                "queries_used": stats.get("queries_used"),
+                "feature_square": stats,
+                "access": self._access,
+                "allow_short_budget": self._allow_short_budget,
+                "query_floor_relaxed": bool(self._allow_short_budget and self.attack.n_queries < 1000),
+                "realizable": False,
+                "space": "feature",
+                "chosen_attack": self.chosen_attack,
+                "selected_attack_impl": self.selected_attack_impl,
+            },
         )
 
 
@@ -640,24 +891,47 @@ class _NeurInSpectreRunner(_BaseRunner):
             )
             char = analyzer.characterize(characterization_loader, eps=cfg.epsilon)
 
-        attack = self._select_attack(model, defense, cfg, char, device, raw_config)
+        attack, chosen_name = self._select_attack(model, defense, cfg, char, device, raw_config)
         super().__init__(_resolve_base_model(model, defense), attack, eval_model=eval_model)
         self.characterization = char
         self._model = model
         self._defense = defense
         self._device = device
         self._raw_config = dict(raw_config)
+        self.chosen_attack = chosen_name
+        self.selected_attack_impl = type(attack).__name__
+        self._annotate_characterization(char, chosen_name, self.selected_attack_impl)
 
     def update_config(self, config: Dict[str, Any]) -> None:
         cfg = _to_attack_config(config)
         self._raw_config.update(dict(config))
-        self.attack = self._select_attack(self._model, self._defense, cfg, self.characterization, self._device, self._raw_config)
+        self.attack, chosen_name = self._select_attack(
+            self._model, self._defense, cfg, self.characterization, self._device, self._raw_config
+        )
+        self.chosen_attack = chosen_name
+        self.selected_attack_impl = type(self.attack).__name__
+        self._annotate_characterization(self.characterization, chosen_name, self.selected_attack_impl)
+
+    @staticmethod
+    def _annotate_characterization(char, chosen_name: str, impl_name: str) -> None:
+        if char is None:
+            return
+        char.chosen_attack = chosen_name
+        char.selected_attack_impl = impl_name
+        metadata = getattr(char, "metadata", None)
+        if isinstance(metadata, dict):
+            metadata["chosen_attack"] = chosen_name
+            metadata["selected_attack_impl"] = impl_name
 
     def _select_attack(self, model, defense, cfg: AttackConfig, char, device: str, raw_config: Dict[str, Any]):
         obf_types = getattr(char, "obfuscation_types", []) if char is not None else []
         requires_bpda = getattr(char, "requires_bpda", False) if char is not None else False
         requires_eot = getattr(char, "requires_eot", False) if char is not None else False
         requires_mapgd = getattr(char, "requires_mapgd", False) if char is not None else False
+        if bool(raw_config.get("always_bpda", cfg.use_bpda)):
+            requires_bpda = True
+        if bool(raw_config.get("always_eot", cfg.use_eot)):
+            requires_eot = True
 
         # Volterra/memory gating:
         # - "auto": use when characterization recommends MA-PGD / memory.
@@ -708,7 +982,7 @@ class _NeurInSpectreRunner(_BaseRunner):
                     memory_length=int(memory_length),
                     kernel_type=str(kernel_type),
                     device=device,
-                )
+                ), "hybrid_volterra"
             logger.info("[NeurInSpectre] Selected attack: HybridBPDAEOT (BPDA+EOT) mode=%s", volterra_mode)
             return HybridBPDAEOT(
                 _resolve_base_model(model, defense),
@@ -721,7 +995,7 @@ class _NeurInSpectreRunner(_BaseRunner):
                 steps=cfg.n_iterations,
                 norm=cfg.norm,
                 device=device,
-            )
+            ), "hybrid"
         if requires_bpda and defense is not None:
             return BPDA(
                 _resolve_base_model(model, defense),
@@ -732,7 +1006,7 @@ class _NeurInSpectreRunner(_BaseRunner):
                 steps=cfg.n_iterations,
                 norm=cfg.norm,
                 device=device,
-            )
+            ), "bpda"
         if requires_eot and defense is not None:
             return EOT(
                 _resolve_base_model(model, defense),
@@ -744,7 +1018,7 @@ class _NeurInSpectreRunner(_BaseRunner):
                 steps=cfg.n_iterations,
                 norm=cfg.norm,
                 device=device,
-            )
+            ), "eot"
         if requires_mapgd and use_volterra:
             logger.info("[NeurInSpectre] Selected attack: MA-PGD (Volterra memory) mode=%s", volterra_mode)
             return MAPGD(
@@ -756,7 +1030,7 @@ class _NeurInSpectreRunner(_BaseRunner):
                 alpha_volterra=getattr(char, "alpha_volterra", None) if char is not None else None,
                 memory_length=getattr(char, "recommended_memory_length", None) if char is not None else None,
                 device=device,
-            )
+            ), "mapgd"
         return APGD(
             model,
             eps=cfg.epsilon,
@@ -765,11 +1039,15 @@ class _NeurInSpectreRunner(_BaseRunner):
             loss=cfg.loss.value,
             n_restarts=cfg.n_restarts,
             device=device,
-        )
+        ), "apgd"
 
     def run(self, x: torch.Tensor, y: torch.Tensor) -> AttackResult:
         x_adv = self.attack(x, y)
         preds = self._predict(x_adv)
         success = preds != y
-        metadata = {"characterization": self.characterization.to_dict() if self.characterization else {}}
+        metadata = {
+            "characterization": self.characterization.to_dict() if self.characterization else {},
+            "chosen_attack": getattr(self, "chosen_attack", None),
+            "selected_attack_impl": getattr(self, "selected_attack_impl", None),
+        }
         return AttackResult(x_adv=x_adv, predictions=preds, success_mask=success, metadata=metadata)

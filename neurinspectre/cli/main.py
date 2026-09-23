@@ -6,11 +6,6 @@ Usage:
     neurinspectre characterize --model resnet50.pth --defense jpeg
     neurinspectre evaluate --config eval.yaml
 
-Cross-ref: Paper Section 4 "Implementation"
-Cross-ref: WOOT 2026 submission
-
-Author: [Redacted]
-Date: 2026-02-05
 Version: 2.0
 """
 
@@ -42,8 +37,30 @@ _CLICK_COMMANDS = {
     "figures",
     "table2",
     "table2-smoke",
+    "audit",
     "compare",
     "config",
+    "score-ember2024-challenge",
+    "missrate-report",
+    "bypass-ledger",
+    "run-capa",
+    "transferability",
+    "train-function-ml",
+    "index-capa-supplement",
+    "lookup-capa-functions",
+    "download-ember2024",
+    "download-ember2024-challenge",
+    "download-ember2024-capa",
+    "tag-pe-corpus",
+    "diagnose-ember-audit",
+    "scope-pe-corpus",
+    "capa-diff-audit",
+    "ember-pipeline-info",
+    "engagement-gaps",
+    "gamma-inject",
+    "iat-probe",
+    "vt-sidecar",
+    "redteam-bundle",
 }
 
 
@@ -69,6 +86,10 @@ def cli(ctx: click.Context, verbose: int, quiet: bool) -> None:
 
         # Full evaluation suite (Paper Section 5)
         neurinspectre evaluate --config evaluation.yaml
+
+        # Audit a defense as a security pipeline
+        neurinspectre audit --target jpeg-carmon --smoke
+        neurinspectre audit --target ember-gbdt --smoke --pe-sample /path/to/pe_dir
 
     Cross-ref: Paper Section 3 "NEURINSPECTRE Framework"
     """
@@ -1370,6 +1391,1243 @@ def table2_smoke_cmd(ctx: click.Context, **kwargs) -> None:
     run_table2_smoke(ctx, **kwargs)
 
 
+@cli.command("audit")
+@click.option(
+    "--target",
+    type=click.Choice([
+        "carmon",
+        "jpeg-carmon",
+        "ember-gbdt",
+        "ember2024-gbdt",
+        "ember2024-win32-gbdt",
+        "ember2024-win64-gbdt",
+        "ember2024-apk-gbdt",
+        "ember2024-elf-gbdt",
+        "ember2024-pdf-gbdt",
+        "ember2024-dotnet-gbdt",
+        "ember2024-all-gbdt",
+    ]),
+    default="carmon",
+    show_default=True,
+    help=(
+        "Preset audit target: carmon, jpeg-carmon, ember-gbdt (EMBER2018), "
+        "ember2024-gbdt (thrember v3 PE), ember2024-win32-gbdt, ember2024-win64-gbdt, "
+        "ember2024-apk-gbdt, ember2024-elf-gbdt, ember2024-pdf-gbdt, "
+        "ember2024-dotnet-gbdt, ember2024-all-gbdt"
+    ),
+)
+@click.option(
+    "--output-dir",
+    "-o",
+    type=click.Path(),
+    default="results/audit",
+    help="Output directory for audit_report.json and evaluate artifacts",
+)
+@click.option(
+    "--model-path",
+    type=click.Path(),
+    default=None,
+    help="Override Carmon2019Unlabeled.pt or ember_model_2018.txt",
+)
+@click.option(
+    "--data-root",
+    type=click.Path(),
+    default="./data/cifar10",
+    help="CIFAR-10 root, or EMBER feature root for --target ember-gbdt",
+)
+@click.option(
+    "--n-examples",
+    type=int,
+    default=None,
+    help="Evaluation samples (default 1000; smoke 8). ember-gbdt --pe-sample: detected-malware PEs",
+)
+@click.option(
+    "--batch-size",
+    type=int,
+    default=None,
+    help="Attack batch size",
+)
+@click.option(
+    "--smoke",
+    "--smoke-test",
+    is_flag=True,
+    help="Tiny official-AA subset (custom APGD-CE) to prove the linter wiring",
+)
+@click.option(
+    "--assert-clean-accuracy/--no-assert-clean-accuracy",
+    default=None,
+    help="Run Carmon clean-acc sanity check on load (default: on unless --smoke)",
+)
+@click.option("--no-pgd", is_flag=True, help="Skip the cheap PGD column")
+@click.option(
+    "--mode",
+    type=click.Choice(["whitebox", "scores", "labels", "feature", "problem", "all"]),
+    default=None,
+    help="Attack access: whitebox (AA/NI), scores, labels, or all (smoke default: all)",
+)
+@click.option(
+    "--query-budgets",
+    type=str,
+    default=None,
+    help="Comma-separated Square query budgets (default 10,50,100,500,5000; smoke 10,25,50)",
+)
+@click.option(
+    "--pe-sample",
+    "--pe-dir",
+    type=click.Path(),
+    default=None,
+    help="PE file or directory for same-sample EMBER problem-space evaluation",
+)
+@click.option(
+    "--benign-corpus",
+    type=click.Path(),
+    default=None,
+    help="Optional benign PE file/dir whose bytes are used as GAMMA-padding payloads",
+)
+@click.option(
+    "--require-official-reproduction",
+    is_flag=True,
+    help="Fail if EMBER v2 extraction is not Elastic-verified (Mac, or lief other than 0.9.0/0.10.1)",
+)
+@click.option(
+    "--require-detected",
+    is_flag=True,
+    help="Fail if same-sample found no GBDT-detected malware PEs",
+)
+@click.option(
+    "--filter-tags-json",
+    type=click.Path(exists=True),
+    default=None,
+    help="Sidecar JSON/JSONL keyed by SHA-256 with per-file caps/ttps/mbc/family/file_type."
+         " Build with neurinspectre run-capa <pe_dir> --sidecar tags.json, or"
+         " scripts/tag_pe_corpus_from_ember2024.py for challenge-set tags.",
+)
+@click.option(
+    "--filter-include-untagged/--filter-exclude-untagged",
+    default=False,
+    help="When Capa filters are active, whether to keep PE files whose SHA-256 is not in the sidecar",
+)
+@click.option("--filter-file-type", "filter_file_type", default=(), multiple=True,
+              help="Capa filter (repeatable): Win32,Win64,Dot_Net,PDF,ELF,APK")
+@click.option("--filter-family", "filter_family", default=(), multiple=True,
+              help="Capa filter (repeatable): family substrings")
+@click.option("--filter-tag", "filter_tag", default=(), multiple=True,
+              help="Capa filter (repeatable): behavior/property/packer/exploit/group")
+@click.option("--filter-ttp", "filter_ttp", default=(), multiple=True,
+              help="Capa filter (repeatable): ATT&CK tactic/technique/ID")
+@click.option("--filter-mbc", "filter_mbc", default=(), multiple=True,
+              help="Capa filter (repeatable): MBC objective/behavior/ID")
+@click.option("--filter-capability", "filter_capability", default=(), multiple=True,
+              help="Capa filter (repeatable): Capa capability or namespace")
+@click.option("--min-vt-detected", "min_vt_detected", type=int, default=None,
+              help="Capa filter: minimum VirusTotal numerator (from detection_ratio)")
+@click.option("--capa-preserve/--no-capa-preserve", default=False,
+              help="Per-mutation capability-preservation gate (file-level Capa). "
+                   "Rejects mutations that drop a capability the original file exhibited.")
+@click.option("--capa-preserve-mode", type=click.Choice(["all", "ttps", "mbc"]), default="all",
+              show_default=True,
+              help="C8: strictness of the capa preservation gate. "
+                   "all=every capability; ttps=only ATT&CK-tagged rules; "
+                   "mbc=only Malware Behavior Catalog-tagged rules.")
+@click.option("--capa-rules-dir", type=click.Path(), default=None,
+              help="Override capa-rules directory (default: $CAPA_RULES or data/capa-rules)")
+@click.option("--enable-iat-edits/--no-iat-edits", default=False,
+              help="Bounded import-table edits (ASCII case toggle on one DLL name). "
+                   "Same audit frame as overlay/Full DOS; does not add imports or "
+                   "change .text.")
+@click.option("--vt-sidecar", type=click.Path(exists=True), default=None,
+              help="Read-only VT-style metadata JSON keyed by SHA-256 (or wrapper "
+                   "with a records map). Never submits to VirusTotal.")
+@click.option("--sow-adapter", multiple=True, default=(),
+              help="Post-audit SOW adapter: sandbox_handoff (copy best_bytes only) "
+                   "or commercial_av_edr (provenance placeholder; requires ack).")
+@click.option("--sow-adapter-ack", is_flag=True,
+              help="Legal/SOW acknowledgment for commercial_av_edr adapter "
+                   "(or set NEURINSPECTRE_SOW_ADAPTER_ACK=1).")
+@click.option("--av-system-name", default=None,
+              help="Named AV/EDR system for commercial_av_edr placeholder JSON only.")
+@click.option("--enable-gamma-sections/--no-gamma-sections", default=False,
+              help="GAMMA section injection via secml-malware (requires pip install "
+                   "neurinspectre[gamma]). Not overlay padding.")
+@click.option("--gamma-donor-dir", type=click.Path(exists=True), default=None,
+              help="Benign PE directory for GAMMA donor sections (default: secml "
+                   "bundled goodware_samples when present).")
+@click.option("--gamma-sections-per-population", type=int, default=5, show_default=True,
+              help="How many donor sections to cache per audit sample search.")
+@click.option("--enable-section-slack/--no-section-slack", default=False,
+              help="Add C7 section-slack padding to the problem-space transform mix. "
+                   "Writes into file-alignment slack of the last section; preserves "
+                   "function bytes and file length by construction.")
+@click.option("--transform-set", type=click.Choice(["default", "combined"]), default="default",
+              show_default=True,
+              help="D10: 'default' mixes Full DOS + padding (+ section-slack when enabled); "
+                   "'combined' applies Full DOS + section-slack + overlay padding in every "
+                   "candidate (AdvMal-TF / PhantomCall multi-region envelope). Implies "
+                   "--enable-section-slack.")
+@click.option("--fulldos-quiet-only/--no-fulldos-quiet-only", default=False,
+              help="E12: reject any candidate whose thrember pefilewarnings feature band "
+                   "differs from the baseline. Makes the 'quiet' property a hard invariant "
+                   "rather than an empirical accident.")
+@click.option("--save-best-bytes/--no-save-best-bytes", default=False,
+              help="D9: write each sample's best-of-search mutated PE to "
+                   "<out>/best_bytes/<sha256>.mutated.bin so transferability "
+                   "re-scoring against other detectors is possible offline.")
+@click.option("--crossing-matrix/--no-crossing-matrix", default=False,
+              help="After audit, score best_bytes on EMBER2018 + 2024 PE/Win32/Win64 "
+                   "(requires --save-best-bytes). Crossing rule: clean p>=0.5, bytes "
+                   "changed, mutated p<0.5.")
+@click.option("--capa-diff-best/--no-capa-diff-best", default=False,
+              help="One-shot Capa diff (vivisect/full) original vs each best_bytes "
+                   "file (requires --save-best-bytes). Not a sandbox gate.")
+@click.option("--capa-diff-backend", type=click.Choice(["file_level", "full"]),
+              default="full", show_default=True,
+              help="Capa backend for --capa-diff-best.")
+@click.option("--write-diagnosis/--no-write-diagnosis", default=False,
+              help="EMBER: write ember_audit_diagnosis.json beside audit_report.json.")
+@click.option(
+    "--device",
+    type=click.Choice(["cuda", "cpu", "mps", "auto"]),
+    default="auto",
+    help="Device for computation",
+)
+@click.option("--seed", type=int, default=42, help="RNG seed")
+@click.option("--verbose", "-v", count=True, help="Increase verbosity")
+@click.option("--no-progress", is_flag=True, help="Disable progress bars")
+@click.pass_context
+def audit_cmd(ctx: click.Context, **kwargs) -> None:
+    """
+    Audit one defense+model as a security pipeline.
+
+    Whitebox: official AA, AA+BPDA, NeurInSpectre. Practical modes: Square on
+    scores or hard labels with ASR-vs-query curves. --smoke uses a custom
+    APGD-CE subset plus short Square budgets.
+
+    ember-gbdt: official Elastic LightGBM. Same-sample Full DOS / padding
+    requires --pe-sample. Feature-space ASR is not PE-valid.
+    """
+    from .audit_cmd import run_audit
+
+    if kwargs.get("assert_clean_accuracy") is None:
+        kwargs["assert_clean_accuracy"] = not bool(kwargs.get("smoke"))
+    run_audit(ctx, **kwargs)
+
+
+@cli.command("score-ember2024-challenge")
+@click.option(
+    "--challenge-dir",
+    type=click.Path(exists=True),
+    default="data/ember/ember2024/dataset/challenge",
+    show_default=True,
+    help="Directory of unzipped EMBER2024 challenge JSONLs",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(),
+    default="results/ember2024/challenge_scoring.json",
+    show_default=True,
+    help="Where to write the per-model / per-file-type summary JSON",
+)
+@click.option(
+    "--pe-model",
+    type=click.Path(),
+    default="data/ember/ember2024/EMBER2024_PE.model",
+    show_default=True,
+)
+@click.option(
+    "--win32-model",
+    type=click.Path(),
+    default="data/ember/ember2024/EMBER2024_Win32.model",
+    show_default=True,
+)
+@click.option(
+    "--win64-model",
+    type=click.Path(),
+    default="data/ember/ember2024/EMBER2024_Win64.model",
+    show_default=True,
+)
+@click.option("--filter-file-type", "filter_file_type", default=(), multiple=True,
+              help="Repeatable / comma list: Win32,Win64,Dot_Net,PDF,ELF,APK")
+@click.option("--filter-family", "filter_family", default=(), multiple=True,
+              help="Repeatable / comma list of family substrings")
+@click.option("--filter-tag", "filter_tag", default=(), multiple=True,
+              help="Repeatable / comma list matching behavior/property/packer/exploit/group")
+@click.option("--filter-ttp", "filter_ttp", default=(), multiple=True,
+              help="Repeatable / comma list matching ATT&CK tactic/technique/ID")
+@click.option("--filter-mbc", "filter_mbc", default=(), multiple=True,
+              help="Repeatable / comma list matching MBC objective/behavior/ID")
+@click.option("--filter-capability", "filter_capability", default=(), multiple=True,
+              help="Repeatable / comma list matching Capa capability or namespace")
+@click.option("--min-vt-detected", "min_vt_detected", type=int, default=None,
+              help="Minimum VirusTotal numerator (from detection_ratio 'X/Y')")
+@click.option("--miss-min-support", "miss_min_support", type=int, default=20, show_default=True,
+              help="Minimum #files carrying a label before it enters the miss scoreboard")
+@click.option("--miss-limit-per-namespace", "miss_limit_per_namespace",
+              type=int, default=25, show_default=True,
+              help="How many top-miss-rate labels to keep per namespace in the JSON")
+def score_ember2024_challenge_cmd(
+    challenge_dir: str,
+    output: str,
+    pe_model: str,
+    win32_model: str,
+    win64_model: str,
+    filter_file_type: tuple[str, ...],
+    filter_family: tuple[str, ...],
+    filter_tag: tuple[str, ...],
+    filter_ttp: tuple[str, ...],
+    filter_mbc: tuple[str, ...],
+    filter_capability: tuple[str, ...],
+    min_vt_detected: int | None,
+    miss_min_support: int,
+    miss_limit_per_namespace: int,
+) -> None:
+    """Score the EMBER 2024 challenge set with the three PE sub-models.
+
+    Uses thrember's v3 raw features shipped inside each challenge JSONL
+    record; no PE binaries required. Detection models are the shipped
+    ``EMBER2024_PE.model`` / ``EMBER2024_Win32.model`` /
+    ``EMBER2024_Win64.model``.
+
+    Capa-informed filters compose as OR within a field, AND across fields;
+    matching is case-insensitive substring and honors bracketed ATT&CK/MBC
+    IDs (``T1055`` matches ``"Process Injection [T1055]"``).
+    """
+    from pathlib import Path
+
+    # Import the standalone script's helper (single source of truth).
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "score_ember2024_challenge",
+        Path(__file__).resolve().parent.parent.parent / "scripts" / "score_ember2024_challenge.py",
+    )
+    if spec is None or spec.loader is None:
+        raise click.ClickException("Could not locate scripts/score_ember2024_challenge.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    from neurinspectre.malware.capa_filters import TagFilter, _parse_csv
+
+    def _flatten(values: tuple[str, ...]) -> list[str]:
+        """Repeated flag semantics: ``--filter-tag a --filter-tag b,c`` → [a, b, c]."""
+        out: list[str] = []
+        for v in values:
+            out.extend(_parse_csv(v))
+        return out
+
+    flt = TagFilter(
+        file_type=_flatten(filter_file_type),
+        family=_flatten(filter_family),
+        tag=_flatten(filter_tag),
+        ttp=_flatten(filter_ttp),
+        mbc=_flatten(filter_mbc),
+        capability=_flatten(filter_capability),
+        min_vt_detected=min_vt_detected,
+    )
+    summary = module._score(
+        Path(challenge_dir),
+        {"PE": pe_model, "Win32": win32_model, "Win64": win64_model},
+        flt,
+        miss_min_support=miss_min_support,
+        miss_limit_per_namespace=miss_limit_per_namespace,
+    )
+    import json as _json
+
+    out_path = Path(output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(_json.dumps(summary, indent=2))
+    click.echo(f"wrote {out_path}")
+    if flt.is_active():
+        click.echo(f"  filter: {flt.as_dict()}")
+        click.echo(
+            f"  seen={summary['n_records_total']}  "
+            f"after_filter={summary['n_after_filter']}  "
+            f"features_built={summary['n_features_built']}"
+        )
+    if summary["n_features_built"] == 0:
+        click.echo("  no records survived filter+extract — nothing scored")
+        return
+    for name, cell in summary["per_model"].items():
+        n = summary["n_features_built"]
+        click.echo(
+            f"  {name:5s}  det>=0.5={cell['detected_ge_0.5']}/{n} "
+            f"({cell['detected_ge_0.5']/n:.3f})  median={cell['median_p']:.4f}"
+        )
+    click.echo(f"  n_miss_all_models: {summary['n_miss_all_models']}")
+
+
+@cli.command("vt-sidecar")
+@click.argument("pe_path", type=click.Path(exists=True))
+@click.option(
+    "--dataset-dir",
+    type=click.Path(exists=True),
+    default=None,
+    help="EMBER2024 challenge JSONL tree (default: data/ember/ember2024/dataset/challenge)",
+)
+@click.option("--output", "-o", type=click.Path(), required=True, help="Write vt_sidecar JSON")
+def vt_sidecar_cmd(pe_path, dataset_dir, output):
+    """Build a read-only VT metadata sidecar from local PE hashes (no live submit)."""
+    import json as _json
+    from pathlib import Path
+
+    from neurinspectre.malware.vt_sidecar import build_vt_sidecar_from_pe_dir
+
+    payload = build_vt_sidecar_from_pe_dir(
+        Path(pe_path),
+        dataset_dir=Path(dataset_dir) if dataset_dir else None,
+    )
+    out = Path(output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+    click.echo(
+        f"wrote {out} n_files={payload.get('n_files')} "
+        f"n_with_detection_ratio={payload.get('n_with_detection_ratio')}"
+    )
+
+
+@cli.command("redteam-bundle")
+@click.argument("pe_sample", type=click.Path(exists=True))
+@click.option("--output-dir", "-o", type=click.Path(), required=True, help="Audit output directory")
+@click.option("--target", default="ember2024-gbdt", show_default=True)
+@click.option("--smoke", is_flag=True, help="Short budgets and small n")
+@click.option("--n-examples", type=int, default=8, show_default=True)
+@click.option("--query-budgets", default=None, help="Comma-separated query budgets")
+@click.option("--enable-gamma-sections/--no-gamma-sections", default=False)
+@click.option("--gamma-donor-dir", type=click.Path(exists=True), default=None)
+@click.option("--enable-iat-edits/--no-iat-edits", default=False)
+@click.option("--require-detected", is_flag=True)
+@click.option("--supplement-index", type=click.Path(exists=True), default=None)
+@click.option("--challenge-dir", type=click.Path(exists=True), default=None)
+@click.option("--vt-dataset-dir", type=click.Path(exists=True), default=None)
+@click.option("--no-vt-sidecar", is_flag=True, help="Skip building vt_sidecar.json")
+@click.option("--sow-adapter", multiple=True, default=())
+@click.option("--sow-adapter-ack", is_flag=True)
+@click.option("--av-system-name", default=None)
+def redteam_bundle_cmd(
+    pe_sample,
+    output_dir,
+    target,
+    smoke,
+    n_examples,
+    query_budgets,
+    enable_gamma_sections,
+    gamma_donor_dir,
+    enable_iat_edits,
+    require_detected,
+    supplement_index,
+    challenge_dir,
+    vt_dataset_dir,
+    no_vt_sidecar,
+    sow_adapter,
+    sow_adapter_ack,
+    av_system_name,
+):
+    """Operator bundle: scope → audit → diagnosis → crossing → zip (no new science)."""
+    from neurinspectre.cli.redteam_bundle_cmd import run_redteam_bundle
+
+    run_redteam_bundle(
+        pe_sample=pe_sample,
+        output_dir=output_dir,
+        target=target,
+        smoke=smoke,
+        n_examples=n_examples,
+        query_budgets=query_budgets,
+        enable_gamma_sections=enable_gamma_sections,
+        gamma_donor_dir=gamma_donor_dir,
+        enable_iat_edits=enable_iat_edits,
+        require_detected=require_detected,
+        supplement_index=supplement_index,
+        challenge_dir=challenge_dir,
+        vt_dataset_dir=vt_dataset_dir,
+        build_vt_sidecar=not no_vt_sidecar,
+        sow_adapter=list(sow_adapter) if sow_adapter else None,
+        sow_adapter_ack=sow_adapter_ack,
+        av_system_name=av_system_name,
+    )
+
+
+@cli.command("scope-pe-corpus")
+@click.argument("pe_path", type=click.Path(exists=True))
+@click.option("--challenge-dir", type=click.Path(exists=True), default=None,
+              help="EMBER2024 challenge JSONL directory (SHA overlap preflight)")
+@click.option("--supplement-index", type=click.Path(exists=True), default=None,
+              help="EMBER2024 Capa supplement index JSON")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write scope JSON (default: stdout)")
+def scope_pe_corpus_cmd(pe_path, challenge_dir, supplement_index, output):
+    """Hash a PE directory and report overlap with challenge + Capa supplement."""
+    import json as _json
+    from pathlib import Path
+    from neurinspectre.malware.pe_scope import scope_pe_corpus
+
+    pe_root = Path(pe_path)
+    click.echo(f"Hashing MZ files under {pe_root} …", err=True)
+    result = scope_pe_corpus(
+        pe_root,
+        challenge_dir=Path(challenge_dir) if challenge_dir else None,
+        supplement_index=Path(supplement_index) if supplement_index else None,
+    )
+    click.echo(
+        f"  {result['n_mz_files']} files; challenge overlap {result['n_overlap_challenge']}; "
+        f"supplement overlap {result['n_overlap_capa_supplement']}",
+        err=True,
+    )
+    text = _json.dumps(result, indent=2)
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        Path(output).write_text(text)
+        click.echo(f"wrote {output}")
+    else:
+        click.echo(text)
+
+
+@cli.command("transferability")
+@click.argument("report", type=click.Path(exists=True))
+@click.option("--models", "-m", multiple=True, required=False,
+              help="Repeatable: name=path pairs, e.g. -m PE=data/ember/ember2024/EMBER2024_PE.model")
+@click.option("--default-crossing/--no-default-crossing", default=False,
+              help="Use shipped EMBER2018 + PE + Win32 + Win64 checkpoints (skip missing).")
+@click.option("--output", "-o", type=click.Path(),
+              default=None, help="Write transferability JSON here (default: alongside report)")
+def transferability_cmd(report, models, default_crossing, output):
+    """D9: re-score an audit's best-of-search mutated PEs against additional
+    EMBER 2024 sub-model detectors. Requires the audit to have been run
+    with --save-best-bytes.
+    """
+    import json as _json
+    from pathlib import Path
+    from neurinspectre.evaluation.transferability import score_transferability
+    from neurinspectre.evaluation.transferability import default_crossing_model_paths
+
+    parsed: list[tuple[str, Path]] = []
+    if default_crossing:
+        parsed = [(n, p) for n, p in default_crossing_model_paths() if p.is_file()]
+    for m in models or []:
+        if "=" not in m:
+            raise click.BadParameter(f"expected name=path, got {m!r}")
+        name, path = m.split("=", 1)
+        parsed.append((name.strip(), Path(path.strip())))
+    if not parsed:
+        raise click.ClickException("Pass -m name=path and/or --default-crossing")
+    result = score_transferability(Path(report), parsed)
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        Path(output).write_text(_json.dumps(result, indent=2))
+        click.echo(f"wrote {output}")
+    else:
+        click.echo(_json.dumps(result["summary"], indent=2))
+        click.echo(f"n_samples: {result['n_samples']}")
+
+
+@cli.command("train-function-ml")
+@click.option("--supplement", type=click.Path(),
+              default="data/ember/ember2024/capa", show_default=True)
+@click.option("--index", type=click.Path(),
+              default="data/ember/ember2024/capa_supplement_index.json", show_default=True)
+@click.option("--output", "-o", type=click.Path(),
+              default="results/ember2024/E11/function_ml_report.json", show_default=True)
+@click.option("--top-k-labels", type=int, default=20, show_default=True)
+@click.option("--target-per-capability", type=int, default=5000, show_default=True)
+@click.option("--negative-pool-size", type=int, default=20000, show_default=True)
+@click.option("--feature-dim", type=int, default=4096, show_default=True)
+@click.option("--n-estimators", type=int, default=200, show_default=True)
+@click.option("--max-records-scan", type=int, default=None,
+              help="Cap total records read from shards (for smoke tests)")
+@click.option("--seed", type=int, default=42, show_default=True)
+def train_function_ml_cmd(supplement, index, output, top_k_labels,
+                          target_per_capability, negative_pool_size,
+                          feature_dim, n_estimators, max_records_scan, seed):
+    """E11: train per-capability LightGBM classifiers on Capa supplement
+    functions (opcode n-grams over disassembly)."""
+    import importlib.util, sys
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "train_function_ml",
+        Path(__file__).resolve().parent.parent.parent / "scripts" / "train_function_ml.py",
+    )
+    if spec is None or spec.loader is None:
+        raise click.ClickException("Could not locate scripts/train_function_ml.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    argv = [
+        "--supplement", str(supplement),
+        "--index", str(index),
+        "--output", str(output),
+        "--top-k-labels", str(top_k_labels),
+        "--target-per-capability", str(target_per_capability),
+        "--negative-pool-size", str(negative_pool_size),
+        "--feature-dim", str(feature_dim),
+        "--n-estimators", str(n_estimators),
+        "--seed", str(seed),
+    ]
+    if max_records_scan is not None:
+        argv += ["--max-records-scan", str(max_records_scan)]
+    old = sys.argv[:]
+    try:
+        sys.argv = ["train_function_ml.py"] + argv
+        exit_code = module.main()
+    finally:
+        sys.argv = old
+    if exit_code:
+        raise click.ClickException(f"training failed (exit {exit_code})")
+
+
+@cli.command("index-capa-supplement")
+@click.option("--supplement", type=click.Path(), default="data/ember/ember2024/capa",
+              show_default=True, help="Root directory containing the Capa supplement shards")
+@click.option("--output", "-o", type=click.Path(),
+              default="data/ember/ember2024/capa_supplement_index.json", show_default=True)
+@click.option("--limit-functions-per-file", type=int, default=None,
+              help="Cap per-file function count (smoke tests)")
+def index_capa_supplement_cmd(supplement, output, limit_functions_per_file):
+    """Build a compact SHA-256 -> per-function Capa metadata index from the
+    EMBER 2024 Capa supplement (~23.8 GB of shards).
+    """
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "index_capa_supplement",
+        Path(__file__).resolve().parent.parent.parent / "scripts" / "index_capa_supplement.py",
+    )
+    if spec is None or spec.loader is None:
+        raise click.ClickException("Could not locate scripts/index_capa_supplement.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    argv = ["--supplement", str(supplement), "--output", str(output)]
+    if limit_functions_per_file:
+        argv += ["--limit-functions-per-file", str(limit_functions_per_file)]
+    import sys
+    old = sys.argv[:]
+    try:
+        sys.argv = ["index_capa_supplement.py"] + argv
+        exit_code = module.main()
+    finally:
+        sys.argv = old
+    if exit_code:
+        raise click.ClickException(f"indexing failed (exit {exit_code})")
+
+
+@cli.command("lookup-capa-functions")
+@click.argument("sha256")
+@click.option("--index", type=click.Path(exists=True),
+              default="data/ember/ember2024/capa_supplement_index.json", show_default=True,
+              help="Capa supplement index JSON (build with index-capa-supplement)")
+@click.option("--top-capabilities", type=int, default=15, show_default=True)
+def lookup_capa_functions_cmd(sha256, index, top_capabilities):
+    """Look up per-function Capa metadata for one SHA-256 in the supplement index.
+
+    Reads only that hash out of the index. It does not load the 1.4 GB
+    EMBER 2024 index into memory.
+    """
+    from pathlib import Path
+    from neurinspectre.malware.capa_supplement_index import lookup_shas
+    import json as _json
+    funcs = lookup_shas(Path(index), [sha256]).get(sha256.lower(), [])
+    if not funcs:
+        click.echo(f"no supplement entries for sha256={sha256.lower()[:16]}...")
+        return
+    cap_counter: dict[str, int] = {}
+    for f in funcs:
+        for c in f.get("capa") or []:
+            cap_counter[c] = cap_counter.get(c, 0) + 1
+    top = sorted(cap_counter.items(), key=lambda kv: -kv[1])[:top_capabilities]
+    click.echo(_json.dumps({
+        "sha256": sha256.lower(),
+        "n_functions": len(funcs),
+        "n_unique_capabilities": len(cap_counter),
+        "top_capabilities": top,
+        "functions": funcs[:20],
+    }, indent=2))
+
+
+@cli.command("run-capa")
+@click.argument("pe_path", type=click.Path(exists=True))
+@click.option("--backend", type=click.Choice(["file_level", "full"]), default="file_level",
+              show_default=True,
+              help="file_level = pefile (fast, ~1s); full = vivisect (slow, ~minutes)")
+@click.option("--rules-dir", type=click.Path(), default=None,
+              help="capa-rules directory (default: $CAPA_RULES or data/capa-rules)")
+@click.option("--diff-against", type=click.Path(exists=True), default=None,
+              help="Second file: emit capa_diff (dropped/added/preserved) between the two")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write result JSON to this path (default: stdout)")
+@click.option("--sidecar", type=click.Path(), default=None,
+              help="Also write a --filter-tags-json sidecar keyed by SHA-256")
+@click.option("--supplement-index", type=click.Path(exists=True), default=None,
+              help="EMBER 2024 Capa supplement index. Matching SHA-256s get their "
+                   "function labels merged into the result. Hashes that are absent "
+                   "stay file-level only.")
+def run_capa_cmd(pe_path, backend, rules_dir, diff_against, output, sidecar, supplement_index):
+    """Run Capa on one PE or every MZ file in a directory.
+
+    Uses ``neurinspectre.malware.capa_scan``. The ``file_level`` backend
+    matches only file-scoped rules (packer / property / compiler / string
+    patterns) — fast enough for per-mutation gating. The ``full`` backend
+    disassembles with vivisect and matches function-level rules too, but
+    takes minutes per binary.
+
+    ``--sidecar`` writes the tag file ``neurinspectre audit --filter-tags-json``
+    consumes. ``--supplement-index`` adds EMBER 2024 function-level labels
+    only for SHA-256s present in that index.
+    """
+    import hashlib as _hash
+    import json as _json
+    from pathlib import Path
+
+    try:
+        from neurinspectre.malware.capa_scan import (
+            capabilities_file_level, capabilities_full, capa_diff as _diff,
+            filter_sidecar_record, metadata_for_matches, CapaUnavailable,
+        )
+    except ImportError as exc:
+        raise click.ClickException(f"capa wrapper import failed: {exc}")
+
+    fn = capabilities_file_level if backend == "file_level" else capabilities_full
+    rules_p = Path(rules_dir) if rules_dir else None
+    root = Path(pe_path)
+    if diff_against and root.is_dir():
+        raise click.ClickException("--diff-against applies to one file, not a directory")
+
+    def _mz_files(path: Path):
+        if path.is_file():
+            yield path
+            return
+        for candidate in sorted(path.rglob("*")):
+            if not candidate.is_file():
+                continue
+            if any(part.startswith(".") for part in candidate.parts):
+                continue
+            try:
+                with candidate.open("rb") as fh:
+                    magic = fh.read(2)
+            except OSError:
+                continue
+            if magic == b"MZ":
+                yield candidate
+
+    files = list(_mz_files(root))
+    if root.is_dir() and not files:
+        raise click.ClickException(f"no MZ files under {root}")
+
+    supplement_by_sha = {}
+    if supplement_index and not diff_against:
+        from neurinspectre.malware.capa_supplement_index import lookup_shas
+        digests = []
+        for path in files:
+            digests.append(_hash.sha256(path.read_bytes()).hexdigest())
+        supplement_by_sha = lookup_shas(Path(supplement_index), digests)
+
+    rows = []
+    try:
+        if diff_against:
+            original = root.read_bytes()
+            other = Path(diff_against).read_bytes()
+            result = {"path": str(root), "backend": backend, "other_path": str(diff_against)}
+            result.update(_diff(original, other, backend=backend, rules_dir=rules_p))
+            text = _json.dumps(result, indent=2)
+            if output:
+                Path(output).parent.mkdir(parents=True, exist_ok=True)
+                Path(output).write_text(text)
+                click.echo(f"wrote {output}")
+            else:
+                click.echo(text)
+            return
+
+        for index, path in enumerate(files, start=1):
+            data = path.read_bytes()
+            sha = _hash.sha256(data).hexdigest()
+            err = None
+            try:
+                caps = fn(data, rules_dir=rules_p)
+            except CapaUnavailable:
+                raise
+            except Exception as exc:
+                caps = frozenset()
+                err = f"{type(exc).__name__}: {exc}"
+            if root.is_dir():
+                click.echo(
+                    f"[run-capa] {index}/{len(files)} {path.name} n={len(caps)}",
+                    err=True,
+                )
+            rows.append({
+                "path": str(path),
+                "sha256": sha,
+                "capabilities": caps,
+                "error": err,
+                "supplement": supplement_by_sha.get(sha) or [],
+            })
+    except CapaUnavailable as exc:
+        raise click.ClickException(str(exc))
+
+    matched = set()
+    for row in rows:
+        matched.update(row["capabilities"])
+    meta = metadata_for_matches(frozenset(matched), rules_dir=rules_p) if matched else {}
+    sidecar_obj = {}
+    file_results = []
+    for row in rows:
+        record = filter_sidecar_record(
+            sha256=row["sha256"],
+            capabilities=row["capabilities"],
+            metadata=meta,
+            supplement_functions=row["supplement"],
+            path=row["path"],
+            error=row["error"],
+        )
+        sidecar_obj[row["sha256"]] = record
+        file_results.append({
+            "path": row["path"],
+            "sha256": row["sha256"],
+            "backend": backend,
+            "n_capabilities": len(row["capabilities"]),
+            "capabilities": sorted(row["capabilities"]),
+            "n_attack": len(record["ttps"]),
+            "n_mbc": len(record["mbc"]),
+            "in_ember2024_capa_supplement": record["in_ember2024_capa_supplement"],
+            "supplement_n_functions": record["supplement_n_functions"],
+            "supplement_capabilities": record["supplement_capabilities"],
+            "error": row["error"],
+        })
+
+    if len(file_results) == 1 and not root.is_dir():
+        result = file_results[0]
+    else:
+        result = {
+            "kind": "run-capa",
+            "backend": backend,
+            "n_files": len(file_results),
+            "n_errors": sum(1 for row in file_results if row["error"]),
+            "n_in_ember2024_capa_supplement": sum(
+                1 for row in file_results if row["in_ember2024_capa_supplement"]
+            ),
+            "files": file_results,
+        }
+    text = _json.dumps(result, indent=2)
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        Path(output).write_text(text)
+        click.echo(f"wrote {output}")
+    else:
+        click.echo(text)
+    if sidecar:
+        side = Path(sidecar)
+        side.parent.mkdir(parents=True, exist_ok=True)
+        side.write_text(_json.dumps(sidecar_obj, indent=2) + "\n")
+        click.echo(f"wrote sidecar {side} ({len(sidecar_obj)} files)", err=True)
+
+
+@cli.command("bypass-ledger")
+@click.argument("report", type=click.Path(exists=True))
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Where to write the ledger JSON (default: sibling ember_bypass_ledger.json)")
+@click.option("--markdown", "markdown_path", type=click.Path(), default=None,
+              help="Also render a Markdown table to this path")
+@click.option("--close-call-min-delta", type=float, default=0.05, show_default=True,
+              help="Minimum clean_p-best_p drop for a non-flipped row to show up as a close call")
+@click.option("--top-n-tags", type=int, default=8, show_default=True,
+              help="Top-N ATT&CK / MBC / Capa labels per row")
+@click.option("--limit-close-calls", type=int, default=25, show_default=True,
+              help="Cap the close-calls list to N rows (0 = unlimited)")
+def bypass_ledger_cmd(report, output, markdown_path, close_call_min_delta, top_n_tags,
+                      limit_close_calls):
+    """Build a Capa-tagged claim ledger from an audit_report.json.
+
+    Emits one row per successful problem-space bypass (best_p < 0.5) plus
+    one row per close call (score dropped by >=--close-call-min-delta but
+    did not flip). Every row carries the original file's ATT&CK, MBC and
+    Capa provenance so the "still malware" evidence rides alongside the
+    parse-valid ASR.
+    """
+    import json as _json
+    from pathlib import Path
+
+    from neurinspectre.malware.bypass_ledger import (
+        build_ledger,
+        read_report,
+        render_markdown,
+    )
+
+    audit = read_report(report)
+    ledger = build_ledger(
+        audit,
+        close_call_min_delta=close_call_min_delta,
+        top_n_tags=top_n_tags,
+        limit=(limit_close_calls if limit_close_calls else None),
+    )
+    report_path = Path(report)
+    if report_path.is_dir():
+        base = report_path
+    else:
+        base = report_path.parent
+    out = Path(output) if output else (base / "ember_bypass_ledger.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_json.dumps(ledger, indent=2))
+    click.echo(f"wrote {out}")
+    click.echo(
+        f"  n_kept={ledger['n_kept']} n_flipped={ledger['n_flipped']} "
+        f"n_close_calls={ledger['n_close_calls']}"
+    )
+    if markdown_path:
+        md_path = Path(markdown_path)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(render_markdown(ledger))
+        click.echo(f"  markdown -> {md_path}")
+
+
+@cli.command("missrate-report")
+@click.argument("scoring_json", type=click.Path(exists=True))
+@click.option("--namespace", "namespaces", multiple=True, default=(),
+              help="Repeatable: which namespaces to print (default: all present in JSON)")
+@click.option("--top", "top_n", type=int, default=10, show_default=True,
+              help="How many top rows per namespace to print")
+def missrate_report_cmd(scoring_json, namespaces, top_n):
+    """Pretty-print the per-label all-model-miss scoreboard from a scoring JSON.
+
+    Input is any ``challenge_scoring.json`` produced by
+    ``neurinspectre score-ember2024-challenge``. No models are re-run — this
+    is a re-slicer on the already-computed ``miss_cohorts`` block.
+    """
+    import json as _json
+
+    data = _json.loads(Path(scoring_json).read_text())
+    cohorts = data.get("miss_cohorts") or {}
+    if not cohorts:
+        raise click.ClickException(
+            f"{scoring_json} has no 'miss_cohorts' block. Re-run "
+            "`neurinspectre score-ember2024-challenge` to add it."
+        )
+    from neurinspectre.malware.miss_cohorts import summarize_scoreboard
+
+    if namespaces:
+        cohorts = {k: v for k, v in cohorts.items() if k in namespaces}
+    click.echo(summarize_scoreboard(cohorts, top_n=top_n))
+
+
+@cli.command("download-ember2024")
+@click.option("--dest", type=click.Path(), default="data/ember/ember2024", show_default=True,
+              help="Destination directory for model files")
+@click.option("--models", "-m", multiple=True, default=(),
+              help="Repeatable: specific EMBER2024 model filenames (default: PE + Win32 + Win64)")
+@click.option("--all", "all_", is_flag=True,
+              help="Download every .model file in the HuggingFace repo")
+@click.option("--manifest", type=click.Path(), default=None,
+              help="Where to write the SHA-256 manifest (default: <dest>/download_manifest.json)")
+def download_ember2024_cmd(dest, models, all_, manifest):
+    """Fetch EMBER2024 LightGBM detection models with SHA-256 manifest.
+
+    Wraps ``scripts/download_ember2024.py``.
+    """
+    from pathlib import Path
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "download_ember2024",
+        Path(__file__).resolve().parent.parent.parent / "scripts" / "download_ember2024.py",
+    )
+    if spec is None or spec.loader is None:
+        raise click.ClickException("Could not locate scripts/download_ember2024.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    argv = ["--dest", str(dest)]
+    if manifest:
+        argv += ["--manifest", str(manifest)]
+    if all_:
+        argv.append("--all")
+    if models:
+        argv += ["--models", *models]
+    import sys
+    old = sys.argv[:]
+    try:
+        sys.argv = ["download_ember2024.py"] + argv
+        exit_code = module.main()
+    finally:
+        sys.argv = old
+    if exit_code:
+        raise click.ClickException(f"download failed (exit {exit_code})")
+
+
+@cli.command("download-ember2024-challenge")
+@click.option("--dest", type=click.Path(), default="data/ember/ember2024/dataset", show_default=True,
+              help="Destination directory for the challenge archive + unzipped JSONLs")
+@click.option("--manifest", type=click.Path(), default=None,
+              help="Path for the SHA-256 manifest (default: <dest>/challenge_manifest.json)")
+def download_ember2024_challenge_cmd(dest, manifest):
+    """Fetch the 32 MB EMBER2024 challenge JSONLs (features only, no PE binaries)."""
+    from pathlib import Path
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "download_ember2024_challenge",
+        Path(__file__).resolve().parent.parent.parent / "scripts" / "download_ember2024_challenge.py",
+    )
+    if spec is None or spec.loader is None:
+        raise click.ClickException("Could not locate scripts/download_ember2024_challenge.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    argv = ["--dest", str(dest)]
+    if manifest:
+        argv += ["--manifest", str(manifest)]
+    import sys
+    old = sys.argv[:]
+    try:
+        sys.argv = ["download_ember2024_challenge.py"] + argv
+        exit_code = module.main()
+    finally:
+        sys.argv = old
+    if exit_code:
+        raise click.ClickException(f"download failed (exit {exit_code})")
+
+
+@cli.command("download-ember2024-capa")
+@click.option("--dest", type=click.Path(), default="data/ember/ember2024/capa", show_default=True)
+@click.option("--manifest", type=click.Path(), default=None)
+@click.option("--all", "all_", is_flag=True, help="Grab every shard (23.8 GB)")
+@click.option("--smallest", type=int, default=0,
+              help="Grab N smallest shards (sniff a subset)")
+@click.option("--split", type=click.Choice(["train", "test"]), default=None)
+@click.option("--file-type", type=click.Choice(["Win32", "Win64"]), default=None)
+def download_ember2024_capa_cmd(dest, manifest, all_, smallest, split, file_type):
+    """Fetch shards of the EMBER 2024 Capa supplement (function-level, up to 23.8 GB)."""
+    from pathlib import Path
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "download_ember2024_capa",
+        Path(__file__).resolve().parent.parent.parent / "scripts" / "download_ember2024_capa.py",
+    )
+    if spec is None or spec.loader is None:
+        raise click.ClickException("Could not locate scripts/download_ember2024_capa.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    argv = ["--dest", str(dest)]
+    if manifest:
+        argv += ["--manifest", str(manifest)]
+    if all_:
+        argv.append("--all")
+    if smallest:
+        argv += ["--smallest", str(smallest)]
+    if split:
+        argv += ["--split", split]
+    if file_type:
+        argv += ["--file-type", file_type]
+    import sys
+    old = sys.argv[:]
+    try:
+        sys.argv = ["download_ember2024_capa.py"] + argv
+        exit_code = module.main()
+    finally:
+        sys.argv = old
+    if exit_code:
+        raise click.ClickException(f"download failed (exit {exit_code})")
+
+
+@cli.command("tag-pe-corpus")
+@click.option("--pe-dir", type=click.Path(exists=True), required=True,
+              help="Directory of PE files to hash and look up in EMBER2024")
+@click.option("--dataset-dir", type=click.Path(exists=True),
+              default="data/ember/ember2024/dataset/challenge", show_default=True,
+              help="EMBER2024 dataset directory (JSONLs)")
+@click.option("--output", "-o", type=click.Path(), required=True,
+              help="Where to write the SHA-256 -> tag-record sidecar JSON")
+@click.option("--keep-fields",
+              default="sha256,file_type,family,behavior,file_property,packer,exploit,group,caps,ttps,mbc,detection_ratio",
+              show_default=True,
+              help="Comma list of dataset fields to copy into the sidecar")
+def tag_pe_corpus_cmd(pe_dir, dataset_dir, output, keep_fields):
+    """Build a Capa-tag sidecar for a PE corpus by SHA-256 lookup in EMBER2024.
+
+    Output is compatible with ``neurinspectre audit --filter-tags-json``.
+    """
+    from pathlib import Path
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "tag_pe_corpus_from_ember2024",
+        Path(__file__).resolve().parent.parent.parent / "scripts" / "tag_pe_corpus_from_ember2024.py",
+    )
+    if spec is None or spec.loader is None:
+        raise click.ClickException("Could not locate scripts/tag_pe_corpus_from_ember2024.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    argv = [
+        "--pe-dir", str(pe_dir),
+        "--dataset-dir", str(dataset_dir),
+        "--output", str(output),
+        "--keep-fields", keep_fields,
+    ]
+    import sys
+    old = sys.argv[:]
+    try:
+        sys.argv = ["tag_pe_corpus_from_ember2024.py"] + argv
+        exit_code = module.main()
+    finally:
+        sys.argv = old
+    if exit_code:
+        raise click.ClickException(f"tagging failed (exit {exit_code})")
+
+
+@cli.command("diagnose-ember-audit")
+@click.argument("report", type=click.Path(exists=True))
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Diagnosis JSON path (default: sibling ember_audit_diagnosis.json)")
+def diagnose_ember_audit_cmd(report, output):
+    """Summarize an EMBER same-sample audit report into a compact diagnosis JSON."""
+    import json as _json
+    from pathlib import Path
+
+    from neurinspectre.evaluation.ember_audit_diagnosis import (
+        load_ember_audit_report,
+        summarize_ember_audit_report,
+    )
+
+    report_path = Path(report)
+    diag = summarize_ember_audit_report(load_ember_audit_report(report_path))
+    out = Path(output) if output else None
+    if out is None:
+        base = report_path if report_path.is_dir() else report_path.parent
+        out = base / "ember_audit_diagnosis.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_json.dumps(diag, indent=2, default=str), encoding="utf-8")
+    click.echo(f"wrote {out}")
+    if diag.get("n") == 0:
+        raise click.ClickException("diagnosis: no GBDT-detected samples in report")
+
+
+@cli.command("capa-diff-audit")
+@click.argument("report", type=click.Path(exists=True))
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write capa_diff_audit.json (default: sibling of report)")
+@click.option("--capa-rules-dir", type=click.Path(), default=None,
+              help="Override capa-rules directory")
+@click.option("--backend", "capa_diff_backend",
+              type=click.Choice(["file_level", "full"]), default="full", show_default=True)
+@click.option("--max-samples", type=int, default=None,
+              help="Limit rows from best_bytes_manifest")
+def capa_diff_audit_cmd(report, output, capa_rules_dir, capa_diff_backend, max_samples):
+    """Capa diff original vs audit best_bytes PEs (post-hoc; requires --save-best-bytes audit)."""
+    import json as _json
+    from pathlib import Path
+
+    from neurinspectre.evaluation.capa_diff_audit import capa_diff_best_bytes_report
+
+    report_path = Path(report)
+    if report_path.is_dir():
+        report_path = report_path / "audit_report.json"
+    capa_report = capa_diff_best_bytes_report(
+        report_path,
+        rules_dir=Path(capa_rules_dir) if capa_rules_dir else None,
+        backend=str(capa_diff_backend),
+        max_samples=max_samples,
+    )
+    out = Path(output) if output else report_path.parent / "capa_diff_audit.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_json.dumps(capa_report, indent=2, default=str), encoding="utf-8")
+    click.echo(
+        f"wrote {out} n_scanned={capa_report.get('n_scanned')} "
+        f"errors={capa_report.get('n_errors')}"
+    )
+
+
+@cli.command("iat-probe")
+@click.argument("pe_path", type=click.Path(exists=True))
+@click.option("--json/--no-json", "as_json", default=True, show_default=True)
+def iat_probe_cmd(pe_path, as_json):
+    """Probe bounded IAT primitives vs thrember ImportsInfo (no audit spend)."""
+    import json as _json
+    from pathlib import Path
+
+    from neurinspectre.malware.iat_transforms import probe_iat_primitives
+
+    raw = Path(pe_path).read_bytes()
+    if raw[:2] != b"MZ":
+        raise click.ClickException("not a PE file (missing MZ)")
+    report = probe_iat_primitives(raw)
+    if as_json:
+        click.echo(_json.dumps(report, indent=2))
+    else:
+        click.echo(
+            f"api_sites={report['n_api_sites']} dll_sites={report['n_dll_sites']}"
+        )
+        for row in report.get("primitives") or []:
+            click.echo(
+                f"  {row.get('primitive')}: ok={row.get('ok')} "
+                f"L1={row.get('import_feature_l1')}"
+            )
+
+
+@cli.command("gamma-inject")
+@click.argument("pe_path", type=click.Path(exists=True))
+@click.option("--gamma-donor-dir", type=click.Path(exists=True), default=None,
+              help="Benign PE donors (default: secml bundled goodware)")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write mutated PE (default: <pe>.gamma.bin beside input)")
+@click.option("--inject-fraction", type=float, default=1.0, show_default=True,
+              help="Fraction of each injected section content to copy (0,1].")
+def gamma_inject_cmd(pe_path, gamma_donor_dir, output, inject_fraction):
+    """One-shot GAMMA section injection smoke (secml-malware); for operator debugging."""
+    from pathlib import Path
+    from neurinspectre.malware.gamma_env import resolve_gamma_donor_dir
+    from neurinspectre.malware.gamma_section import (
+        gamma_secml_status,
+        inject_gamma_sections,
+        load_section_population,
+    )
+    from neurinspectre.malware.pe_transforms import evaluate_transform_validity
+
+    if not gamma_secml_status().get("available"):
+        raise click.ClickException("Install neurinspectre[gamma] (secml-malware) first.")
+    src = Path(pe_path)
+    raw = src.read_bytes()
+    donor, _tag = resolve_gamma_donor_dir(gamma_donor_dir)
+    if donor is None:
+        raise click.ClickException("No donor dir; pass --gamma-donor-dir or install secml goodware.")
+    population, _meta = load_section_population(donor, how_many=5)
+    mutated = inject_gamma_sections(
+        raw, population, seed=42, inject_fraction=float(inject_fraction)
+    )
+    gate = evaluate_transform_validity(raw, mutated, kind="gamma_section")
+    out = Path(output) if output else src.with_suffix(src.suffix + ".gamma.bin")
+    out.write_bytes(mutated)
+    click.echo(f"wrote {out} ({len(raw)} -> {len(mutated)} bytes)")
+    click.echo(f"validity passed={gate.get('passed')} reasons={gate.get('reasons')}")
+
+
+@cli.command("engagement-gaps")
+@click.option("--json/--no-json", "as_json", default=True, show_default=True,
+              help="Print engagement gap catalog as JSON")
+def engagement_gaps_cmd(as_json):
+    """List SOW boundaries: sandbox, AV/EDR, GAMMA section injection, IAT/graph (not CLI attacks)."""
+    import json as _json
+
+    from neurinspectre.malware.measurement_scope import engagement_gaps_summary
+
+    summary = engagement_gaps_summary()
+    if as_json:
+        click.echo(_json.dumps(summary, indent=2))
+        return
+    click.echo(summary["cli_policy"])
+    for row in summary["not_measured"]:
+        click.echo(f"  - {row['id']}: {row.get('client_question')}")
+
+
+@cli.command("ember-pipeline-info")
+@click.option(
+    "--target",
+    required=True,
+    help="Audit target (ember-gbdt, ember2024-gbdt, jpeg-carmon, carmon, …)",
+)
+@click.option("--device", type=click.Choice(["cuda", "cpu", "mps", "auto"]), default="cpu",
+              show_default=True)
+@click.option("--json/--no-json", "as_json", default=True, show_default=True,
+              help="Print pipeline characterization JSON")
+def ember_pipeline_info_cmd(target, device, as_json):
+    """Print SecurityPipeline characterization + measurement_scope for an audit target."""
+    import json as _json
+
+    from neurinspectre.cli.audit_cmd import characterize_audit_pipeline
+
+    info = characterize_audit_pipeline(target, device=device)
+    if as_json:
+        click.echo(_json.dumps(info, indent=2, default=str))
+    else:
+        click.echo(str(info))
+
+
 @cli.command("doctor")
 @click.option("--json-output", type=click.Path(), help="Write environment report JSON to path")
 @click.option("--as-json", is_flag=True, help="Print environment report JSON to stdout")
@@ -1381,6 +2639,18 @@ def table2_smoke_cmd(ctx: click.Context, **kwargs) -> None:
     help="Models directory to scan for stub metadata",
 )
 @click.option("--check-models/--no-check-models", default=True, help="Scan models dir for stub markers")
+@click.option(
+    "--gamma-donor-dir",
+    type=click.Path(exists=True),
+    default=None,
+    help="Benign PE dir for GAMMA donor preflight (optional)",
+)
+@click.option("--check-gamma/--no-check-gamma", default=True, help="Report secml GAMMA readiness")
+@click.option(
+    "--gamma-smoke-inject/--no-gamma-smoke-inject",
+    default=True,
+    help="Run one minimal GAMMA inject when secml is installed",
+)
 @click.pass_context
 def doctor_cli_cmd(ctx: click.Context, **kwargs) -> None:
     """Environment + dependency sanity checks (no network)."""
@@ -1430,23 +2700,64 @@ def drift_detect_cmd(
 
 
 @cli.command("config")
-@click.argument("config_type", type=click.Choice(["attack", "defense", "evaluation"]))
+@click.argument("config_type", type=click.Choice(["attack", "defense", "evaluation", "audit"]))
 @click.option("--output", "-o", type=click.Path(), help="Output file (default: stdout)")
-def config_cmd(config_type: str, output: str | None) -> None:
+@click.option(
+    "--target",
+    type=click.Choice([
+        "carmon",
+        "jpeg-carmon",
+        "ember-gbdt",
+        "ember2024-gbdt",
+        "ember2024-win32-gbdt",
+        "ember2024-win64-gbdt",
+        "ember2024-apk-gbdt",
+        "ember2024-elf-gbdt",
+        "ember2024-pdf-gbdt",
+        "ember2024-dotnet-gbdt",
+        "ember2024-all-gbdt",
+    ]),
+    default="carmon",
+    show_default=True,
+    help="Preset for `config audit`",
+)
+@click.option("--smoke/--full", default=True, show_default=True, help="Smoke vs full budgets for `config audit`")
+@click.option("--pe-sample", "--pe-dir", type=click.Path(), default=None, help="PE file/dir for ember-gbdt same-sample")
+@click.option("--benign-corpus", type=click.Path(), default=None, help="Benign PE file/dir for GAMMA-padding payloads")
+def config_cmd(
+    config_type: str,
+    output: str | None,
+    target: str,
+    smoke: bool,
+    pe_sample: str | None,
+    benign_corpus: str | None,
+) -> None:
     """
     Generate example configuration files.
 
     \b
     Examples:
-        # Generate attack config
         neurinspectre config attack > attack.yaml
-
-        # Generate full evaluation config
         neurinspectre config evaluation -o evaluation.yaml
+        neurinspectre config audit --target ember-gbdt --smoke --pe-sample ./pe_dir
     """
-    from .config import generate_example_config
+    if config_type == "audit":
+        import yaml
 
-    config_str = generate_example_config(config_type)
+        from .audit_cmd import build_audit_config
+
+        payload = build_audit_config(
+            target=target,
+            n_examples=8 if smoke else 1000,
+            smoke=smoke,
+            pe_sample=pe_sample,
+            benign_corpus=benign_corpus,
+        )
+        config_str = yaml.safe_dump(payload, sort_keys=False)
+    else:
+        from .config import generate_example_config
+
+        config_str = generate_example_config(config_type)
 
     if output:
         Path(output).write_text(config_str)

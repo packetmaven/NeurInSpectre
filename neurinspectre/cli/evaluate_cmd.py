@@ -280,12 +280,19 @@ def _aggregate_results_across_seeds(
                 per_seed_metrics.append(metrics if isinstance(metrics, dict) else {})
             attacks_out[attack] = _aggregate_pair_metrics(per_seed_metrics, seeds=seeds)
 
+        characterization = {}
+        for m in per_seed_maps:
+            if key in m and isinstance(m[key].get("characterization"), dict) and m[key]["characterization"]:
+                characterization = dict(m[key]["characterization"])
+                break
+
         aggregated.append(
             {
                 "defense": defense_name,
                 "type": defense_type,
                 "dataset": dataset_name,
                 "attacks": attacks_out,
+                "characterization": characterization,
                 "multi_seed": {"enabled": True, "seeds": list(seeds), "n_seeds": int(len(seeds))},
             }
         )
@@ -366,7 +373,7 @@ def run_evaluation(ctx: click.Context, **kwargs: Any) -> None:
     summary_only = bool(kwargs.get("summary_only", False))
 
     # -------------------------------------------------------------------
-    # Issue 8 (+ WOOT revision): multi-seed replication (mean ± std + 95% CI)
+    # Issue 8: multi-seed replication (mean ± std + 95% CI)
     # -------------------------------------------------------------------
     seed_override = kwargs.get("_seed_override", None)
     if seed_override is not None:
@@ -965,6 +972,7 @@ def _evaluate_defense(
         split=split,
         download=bool(dataset_cfg.get("download", True)),
         device=device,
+        filter_label=dataset_cfg.get("filter_label"),
     )
 
     model_ref = _resolve_model_ref(defense_entry, config, dataset_name)
@@ -1037,6 +1045,13 @@ def _evaluate_defense(
             "model_path",
             "model_name",
             "model_factory",
+            "model_spec",
+            "model_provenance",
+            "domain",
+            "claimed_robust_accuracy",
+            "enabled",
+            "id",
+            "group",
         }
     }
     if "defense_config" in defense_params or "config_path" in defense_params:
@@ -1100,7 +1115,17 @@ def _evaluate_defense(
         # *defended* model. For BPDA/EOT/Hybrid/NeurInSpectre, we need both the
         # base model and the defense wrapper so the attack can use transform()
         # and/or BPDA approximations.
-        if attack_key in {"bpda", "eot", "hybrid", "neurinspectre"}:
+        if attack_key in {
+            "bpda",
+            "eot",
+            "hybrid",
+            "hybrid_volterra",
+            "hybrid-volterra",
+            "neurinspectre",
+            "aa_bpda",
+            "autoattack_bpda",
+            "aa_official_bpda",
+        }:
             attack_model = model
             attack_defense = defense_model
         else:
@@ -1122,6 +1147,7 @@ def _evaluate_defense(
             defense=attack_defense,
             device=device,
         )
+        query_budgets = attack_cfg.get("query_budgets", config.get("query_budgets"))
         summary = evaluate_attack_runner(
             runner,
             eval_model,
@@ -1130,6 +1156,7 @@ def _evaluate_defense(
             device=device,
             targeted=bool(attack_cfg.get("targeted", False)),
             norm=attack_cfg.get("norm", "Linf"),
+            query_budgets=query_budgets,
         )
         gates = resolve_validity_gates(config)
         validity = evaluate_clean_validity(summary, gates)
@@ -1144,6 +1171,9 @@ def _evaluate_defense(
                     f"{int(validity.get('observed', {}).get('samples', 0))} "
                     f"reasons={','.join(validity.get('reasons', []) or [])}"
                 )
+        if hasattr(runner, "chosen_attack") and runner.chosen_attack:
+            summary.setdefault("chosen_attack", runner.chosen_attack)
+            summary.setdefault("selected_attack_impl", getattr(runner, "selected_attack_impl", None))
         attack_results[str(attack_name)] = summary
 
         if progress_callback:

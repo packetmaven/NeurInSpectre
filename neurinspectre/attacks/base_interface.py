@@ -52,7 +52,7 @@ class AttackConfig:
     batch_size: int = 128
     early_stop: bool = True
     use_bpda: bool = False
-    bpda_approximation: str = "identity"
+    bpda_approximation: str = "defense"
     use_eot: bool = False
     eot_samples: int = 20
     eot_importance_weighted: bool = True

@@ -22,8 +22,6 @@
 
 NeurInSpectre rejects the black-box paradigm. By instrumenting model internals—weight matrices, spectral eigenvalues, attention heads, and activation flows—we expose the exact computational mechanisms that drive model decisions. Red Teams gain the ability to systematically identify and exploit model vulnerabilities through white-box analysis. Blue Teams gain the visibility needed to detect adversarial activation patterns and harden against mechanistic attack surfaces. This is security through transparency.
 
-**Deep dive:** (redacted for double-blind submission)
-
 <a id="the-problem"></a>
 
 ## The Problem
@@ -117,6 +115,7 @@ Traditional blue teams monitor API calls and output statistics. NeurInSpectre en
 - [The Solution: NeurInSpectre](#the-solution-neurinspectre)
 - [What Makes NeurInSpectre Different](#what-makes-neurinspectre-different)
 - [Why This Matters](#why-this-matters)
+- [Malware ML — same-sample PE audit](#malware-ml-same-sample-audit)
 - [References](#references)
 
 ### **🚀 Getting Started**
@@ -224,7 +223,7 @@ Traditional blue teams monitor API calls and output statistics. NeurInSpectre en
   - [Section 3 - Compare Modes](#section-3--compare-modes-output)
   - [Section 3 - Compare Modes (Real Output)](#section-3--compare-modes-real-output)
   - [Section 4 - Signal-to-Action Mapping (Evaluation/Regression)](#section-4--signal-to-action-mapping-evaluation-regression)
-  - [Section 5 - WOOT AEC Compliance](#section-5--woot-aec-compliance)
+  - [Section 5 - Reproducibility and Reuse](#section-5--reproducibility-and-reuse)
 - [AttentionGuard transformer anomaly analysis](#attentionguard-transformer-anomaly-analysis)
 - [Installation & Environment](#installation-environment)
 - [Latest AI Security Research Integration](#latest-ai-security-research-integration)
@@ -261,6 +260,97 @@ In essence, NeurInSpectre operationalizes Amodei's call for interpretability, tr
 
 Built for red teams, blue teams, and security researchers, it integrates cutting-edge security research with practical operational capabilities.
 
+---
+
+<a id="malware-ml-same-sample-audit"></a>
+
+## Malware ML — same-sample PE audit
+
+Engagements often ask whether a sample **still runs** and whether a **deployed
+detector** missed it. NeurInSpectre answers a narrower question: a **named
+LightGBM checkpoint**, on **named byte ranges** (Full DOS / overlay / optional
+section-slack), under a **PE parse gate**, at a stated **query budget**. Audit
+reports include a `measurement_scope` block that states what is *not* measured
+(sandbox execution, commercial AV/EDR, GAMMA section injection, graph/byte
+models). Both frames can be honest; only the second is what this CLI produces.
+
+**Malware ML — same-sample PE audit.** Two Elastic-lineage detectors are
+first-class targets. Public EMBER releases (2018 and 2024) do not ship PE
+binaries; same-sample work requires `--pe-sample`.
+
+Authorized red-team docs: [EMBER audit quickstart](docs/guides/AUTHORIZED_REDTEAM_EMBER.md) ·
+[full engagement playbook](docs/guides/REDTEAM_PLAYBOOK.md) (measurement frame, preflight, crossing matrix).
+
+```bash
+neurinspectre scope-pe-corpus ./pe \
+  --supplement-index data/ember/ember2024/capa_supplement_index.json
+neurinspectre audit --target ember2024-gbdt --pe-sample ./pe \
+  --require-detected --query-budgets 10,50,100,500,5000 \
+  --save-best-bytes --crossing-matrix
+python scripts/diagnose_ember_audit.py results/audit_<run>
+```
+
+`audit_report.json` includes `measurement_scope` and `pipeline` (problem-space only for GBDT).
+`--crossing-matrix` scores best bytes on EMBER2018 + 2024 PE/Win32/Win64 when checkpoints exist.
+
+*EMBER 2018 LightGBM (`ember_model_2018.txt`, dim 2381, LIEF-based v2
+extractor)*
+
+```bash
+neurinspectre audit --target ember-gbdt --pe-sample /pe --require-detected
+neurinspectre audit --target ember-gbdt --pe-sample /pe --require-official-reproduction
+bash scripts/audit_ember_linux_lief090.sh /pe   # official quote_as_ember2018 (Linux LIEF 0.9.0)
+```
+
+`--require-official-reproduction` here fails closed unless Elastic-verified
+(non-Darwin + LIEF `0.9.0` / `0.10.1`).
+
+*EMBER 2024 LightGBM (`EMBER2024_PE.model`, dim 2568, pefile-based
+[thrember](https://github.com/FutureComputing4AI/EMBER2024) v3 extractor —
+Joyce et al., KDD 2025)*
+
+```bash
+python scripts/download_ember2024.py         # SHA-256-manifested HF download
+neurinspectre doctor                         # confirms all 3 ember2024 gbdts + extractor
+neurinspectre audit --target ember2024-gbdt \
+  --pe-sample /pe --require-detected --require-official-reproduction
+python scripts/diagnose_ember_audit.py results/audit_<run>   # compact ledger cell
+```
+
+The Win32 and Win64 specialist detectors are also first-class targets:
+
+```bash
+neurinspectre audit --target ember2024-win32-gbdt --pe-sample /pe --require-detected
+neurinspectre audit --target ember2024-win64-gbdt --pe-sample /pe --require-detected
+```
+
+EMBER2024’s feature version 3 uses pure `pefile`, so `official_reproduction`
+is **cross-platform** (there is no Mac inconsistency, no LIEF pinning). It
+requires `thrember` importable and `signify>=0.7,<0.9` (thrember 0.1.0 still
+imports the pre-0.9 signify layout). A narrow
+`_apply_authenticode_shim()` extends thrember's
+`AuthenticodeSignature.raw_features` catch list to cover signify 0.8's
+`CertificateStore` drift; on the reference corpus this lifts extractor
+success from 102/148 to 148/148 files. The shim is idempotent and reported
+in `neurinspectre doctor` under `EMBER2024: … extractor=True …` and in
+`extractor_status()["shims"]`.
+
+The feature-space and problem-space columns are reported **separately** for
+both models so FeatureSquare (unrealizable L∞ on mixed-scale features) is
+never quoted as a PE-valid bypass. Do not conflate 2018 and 2024 numbers on
+the same corpus: the models see different files (2018 detected 56/148 on
+the reference corpus, 2024 detected 97/102 parseable) and have different
+extractor failure modes.
+
+PE binaries are never committed. The same-sample audit is opt-in via
+`--pe-sample /your/dir`.
+
+```bash
+neurinspectre table2-smoke --output-dir results/smoke
+```
+
+---
+
 <a id="-quick-start"></a>
 
 ## 🚀 Quick Start
@@ -278,9 +368,9 @@ Built for red teams, blue teams, and security researchers, it integrates cutting
 
 #### **Option 1: Quick Install (Recommended)**
 ```bash
-# Double-blind friendly: start from the provided artifact archive
-tar -xzf <artifact>.tar.gz
-cd <artifact_root>
+# From a clone or a snapshot archive
+git clone https://github.com/packetmaven/NeurInSpectre.git
+cd NeurInSpectre
 
 # Create virtual environment
 python3 -m venv .venv-neurinspectre
@@ -310,9 +400,8 @@ neurinspectre --help
 ### Installation
 
 ```bash
-# Double-blind friendly: start from the provided artifact archive
-tar -xzf <artifact>.tar.gz
-cd <artifact_root>
+git clone https://github.com/packetmaven/NeurInSpectre.git
+cd NeurInSpectre
 pip install -e ".[dev]"
 
 # Verify installation
@@ -1908,7 +1997,7 @@ parametric $N(u,t)$** for "RL-trained" or "stochastic" obfuscation:
 
 - Real defenses (and RL-trained evasion policies) are generally **state-dependent**
   and can be **aperiodic**; a fixed $\sin(2\pi t)$ model is at best didactic.
-- For WOOT/AE defensibility, the repo treats "RL-trained"/"stochastic"/"shattered"
+- The repo treats "RL-trained"/"stochastic"/"shattered"
   as **measurement-driven hypotheses** supported by multiple observable signals.
 
 **Implementation (measurement-driven characterization + attack adaptation):**
@@ -2628,12 +2717,12 @@ Baseline comparisons require an external expected-ASR file (not stored in-repo).
 | `delta` (compare: runs) | >= `--threshold` | Regression vs prior run | Flag CI/CD, investigate config/model drift |
 | `delta` (compare: baseline) | outside tolerance | Divergence vs expected baseline file | Re-check config + dataset parity |
 
-<a id="section-5--woot-aec-compliance"></a>
+<a id="section-5--reproducibility-and-reuse"></a>
 
-#### Section 5 - WOOT AEC Compliance (Reproducibility and Reuse)
+#### Section 5 - Reproducibility and Reuse
 
 **Baseline policy**  
-- This repo intentionally does not ship paper baselines or expected ASR numbers.  
+- This repo intentionally does not ship expected ASR numbers.  
 - For validation, supply expected values via external files (`--expected-asr-path`, `baseline_validation.expected_asr_path`).
 
 **Completeness**  

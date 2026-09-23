@@ -172,7 +172,13 @@ def _normalize_table2_spec(
         config_key = attack_spec.get("config_key")
         resolved = dict(defaults.get(str(config_key), {}) or {}) if config_key else {}
         resolved["name"] = str(attack_name)
-        if str(attack_name).lower() == "neurinspectre":
+        extra_skip = {"enabled", "config_key", "id", "module", "class_name", "uses_autoattack", "notes"}
+        for key, value in attack_spec.items():
+            if key in extra_skip:
+                continue
+            resolved.setdefault(key, value)
+        resolved.setdefault("type", str(attack_spec.get("type") or attack_name))
+        if str(resolved.get("type") or attack_name).lower() == "neurinspectre":
             resolved.setdefault("characterization_samples", 50)
         attacks_out.append(resolved)
     cfg["attacks"] = _normalize_attacks(attacks_out)
@@ -219,7 +225,24 @@ def _normalize_table2_spec(
             entry["model_spec"] = dict(model_spec)
             explicit_path = model_spec.get("path") or model_spec.get("checkpoint_path") or model_spec.get("weights_path")
             resolved_path = str(explicit_path) if explicit_path else _resolve_checkpoint_tag_model_path(model_spec.get("checkpoint_tag"))
-            if resolved_path:
+            looks_carmon = any(
+                "carmon2019" in str(model_spec.get(k) or "").lower()
+                for k in ("model_name", "factory_key", "loader", "checkpoint_tag", "path")
+            ) or (
+                str(model_spec.get("training_type") or "").lower() in {"robustbench", "rb"}
+                and "carmon" in str(model_spec.get("model_name") or "carmon2019").lower()
+            )
+            if looks_carmon:
+                carmon_path = resolved_path or "models/cifar10/Linf/Carmon2019Unlabeled.pt"
+                entry["model"] = {
+                    "path": carmon_path,
+                    "model_name": model_spec.get("model_name") or "Carmon2019Unlabeled",
+                    "training_type": model_spec.get("training_type") or "robustbench",
+                    "loader": "carmon2019",
+                    "dataset": dataset_name or "cifar10",
+                    "assert_clean_accuracy": bool(model_spec.get("assert_clean_accuracy", False)),
+                }
+            elif resolved_path:
                 entry["model_path"] = resolved_path
             else:
                 # Fall back to the per-dataset model while keeping the provenance hint for audit.
@@ -470,6 +493,8 @@ def _normalize_defense_type(defense_type: str) -> str:
         "adversarial_training_transform": "at_transform",
         "certified_randomized_smoothing": "certified_defense",
         "random_pad_and_crop": "random_pad_crop",
+        "identity": "none",
+        "id": "none",
     }
     return alias.get(key, key)
 

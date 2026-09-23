@@ -273,6 +273,7 @@ data/large_datasets/
 *.weights
 
 # IDE
+.cursor/
 .vscode/
 .idea/
 *.swp

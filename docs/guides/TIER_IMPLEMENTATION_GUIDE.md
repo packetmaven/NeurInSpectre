@@ -14,7 +14,7 @@ source .venv-neurinspectre/bin/activate
 neurinspectre doctor --as-json > results/tier1_doctor.json
 ```
 
-### 2) Produce WOOT-checkable harness artifacts
+### 2) Produce the Table 8 harness bundle
 
 If `results/table8_run_v2` is already complete, package it directly:
 
@@ -133,6 +133,5 @@ Validation gate:
 
 ### D) Reporting policy
 
-- Until A/B/C are complete, keep draft claims constrained to runnable behavior
-  and preserve the decision register in `DRAFT_CODE_AUDIT.md`.
+- Until A/B/C are complete, keep claims constrained to runnable behavior.
 

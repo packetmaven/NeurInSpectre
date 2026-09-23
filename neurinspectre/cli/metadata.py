@@ -85,6 +85,9 @@ def collect_env_metadata() -> Dict[str, Any]:
     # Optional modules by import name (best-effort).
     for mod in (
         "ember",
+        "lief",
+        "lightgbm",
+        "pefile",
         "nuscenes",
         "onnxruntime",
         "robustbench",

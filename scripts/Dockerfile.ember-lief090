@@ -1,0 +1,54 @@
+# Linux amd64 + Python 3.6 + LIEF 0.9.0.
+# Elastic verified EMBER v2 on this pair (not on Mac, not on lief 0.13).
+#
+# LIEF 0.9.0 published only py2.7/py3.5/py3.6 linux x86_64 eggs. The NeurInSpectre
+# 3.10 CLI cannot import that binary, so this image is a separate runner.
+#
+#   docker build --platform linux/amd64 \
+#     -f scripts/Dockerfile.ember-lief090 \
+#     -t neurinspectre:ember-lief090 scripts/
+FROM python:3.6-slim-buster
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Buster left the live mirrors. trusted=yes skips the expired archive key.
+RUN printf 'deb [trusted=yes] http://archive.debian.org/debian buster main\n\
+deb [trusted=yes] http://archive.debian.org/debian-security buster/updates main\n' > /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check-valid \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Last pip that still supports CPython 3.6.
+RUN python -m pip install --upgrade "pip==21.3.1" "setuptools<60" "wheel<0.38"
+
+# Official egg. pip's lief==0.9.0 sdist is a 6 KB downloader; install the
+# GitHub py3.6 linux egg directly so the version string is lief 0.9.0.
+RUN curl -fsSL -o /tmp/lief.egg \
+        https://github.com/lief-project/LIEF/releases/download/0.9.0/lief-0.9.0-py3.6-linux.egg \
+    && python -c "import zipfile,site; zipfile.ZipFile('/tmp/lief.egg').extractall(site.getsitepackages()[0])" \
+    && rm -f /tmp/lief.egg \
+    && python -c "import lief; assert lief.__version__.startswith('0.9.0'), lief.__version__; print('lief', lief.__version__)"
+
+RUN python -m pip install \
+        "numpy==1.19.5" \
+        "scipy==1.5.4" \
+        "scikit-learn==0.24.2" \
+        "pandas==1.1.5" \
+        "lightgbm==3.3.2" \
+        "pefile==2021.9.3" \
+        "tqdm==4.64.1"
+
+# elastic/ember master still pins lief==0.9.0 in requirements.txt.
+RUN python -m pip install "git+https://github.com/elastic/ember.git" --no-deps \
+    && python -c "from ember.features import PEFeatureExtractor; e=PEFeatureExtractor(2, print_feature_warning=False); print('ember dim', e.dim)"
+
+WORKDIR /work
+ENTRYPOINT ["python"]

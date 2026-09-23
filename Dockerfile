@@ -26,11 +26,16 @@ COPY . .
 # To include dev tooling (pytest/black/etc), build with:
 #   docker build --build-arg INSTALL_DEV=1 ...
 ARG INSTALL_DEV=0
+ARG INSTALL_MALWARE=0
 RUN python3 -m pip install --upgrade pip setuptools wheel && \
     if [ "${INSTALL_DEV}" = "1" ]; then \
       python3 -m pip install -e ".[dev]" --extra-index-url https://download.pytorch.org/whl/cu121 ; \
     else \
       python3 -m pip install -e "." --extra-index-url https://download.pytorch.org/whl/cu121 ; \
+    fi && \
+    if [ "${INSTALL_MALWARE}" = "1" ]; then \
+      python3 -m pip install -e ".[malware]" && \
+      python3 -m pip install "git+https://github.com/elastic/ember.git" --no-deps ; \
     fi && \
     rm -rf /root/.cache/pip
 

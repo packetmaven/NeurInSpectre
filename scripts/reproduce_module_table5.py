@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """
-Reproduce Table 5 (Subnetwork Hijacking) from the CCS '26 offensive paper:
+Subnetwork hijack on CIFAR-10 (Table 5).
 
-    "NeurInSpectre: An Offensive Framework for Breaking Gradient Obfuscation
-     in AI Safety Systems via Spectral-Volterra-Krylov Analysis"
-
-Paper Table 5 claims (ResNet-50 + CIFAR-10, paper's protocol):
+Table 5 claims (ResNet-50 + CIFAR-10):
 
     Subnet   Params   BD ASR    dAcc     NeuralCleanse   Spectral Sigs.
     -----    ------   -------   ------   -------------   --------------
@@ -749,7 +746,7 @@ def _run_one_seed(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Reproduce CCS '26 offensive paper Table 5 — subnetwork hijack"
+        description="Subnetwork hijack on CIFAR-10 (Table 5)"
     )
     parser.add_argument(
         "--subnet-fraction", type=float, default=0.06,
@@ -803,7 +800,7 @@ def main() -> int:
         "WRN-28-10 (Carmon2019)" if args.model == "standard_at" else "ResNet-20 (untrained)"
     )
     print("=" * 76)
-    print(" CCS '26 offensive paper -- Table 5 (subnet hijack) reproduction")
+    print(" Table 5 — subnetwork hijack on CIFAR-10")
     print(f" Backbone: {model_label}  |  Dataset: CIFAR-10")
     print(f" subnet_fraction={args.subnet_fraction:.0%}  "
           f"poison_rate={args.poison_rate:.0%}  "

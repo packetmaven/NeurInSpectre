@@ -239,6 +239,70 @@ def _torch_device_report() -> Dict[str, Any]:
     return rep
 
 
+def _audit_readiness() -> Dict[str, Any]:
+    """Local assets needed by `neurinspectre audit`. No network."""
+    from neurinspectre.malware.ember_extract import extractor_status
+    from neurinspectre.malware.ember2024_extract import extractor_status as ember2024_extractor_status
+
+    carmon = Path("models/cifar10/Linf/Carmon2019Unlabeled.pt")
+    gbdt = Path("data/ember/ember2018/ember_model_2018.txt")
+    ember_vectors = Path("data/ember/ember_2018/X_test.dat")
+    ext = extractor_status()
+    gbdt2024 = Path("data/ember/ember2024/EMBER2024_PE.model")
+    gbdt2024_win32 = Path("data/ember/ember2024/EMBER2024_Win32.model")
+    gbdt2024_win64 = Path("data/ember/ember2024/EMBER2024_Win64.model")
+    gbdt2024_apk = Path("data/ember/ember2024/EMBER2024_APK.model")
+    gbdt2024_elf = Path("data/ember/ember2024/EMBER2024_ELF.model")
+    gbdt2024_pdf = Path("data/ember/ember2024/EMBER2024_PDF.model")
+    gbdt2024_dotnet = Path("data/ember/ember2024/EMBER2024_Dot_Net.model")
+    gbdt2024_all = Path("data/ember/ember2024/EMBER2024_all.model")
+    ext2024 = ember2024_extractor_status()
+    return {
+        "cli": (
+            "neurinspectre audit --target "
+            "{carmon,jpeg-carmon,ember-gbdt,ember2024-gbdt,"
+            "ember2024-win32-gbdt,ember2024-win64-gbdt,"
+            "ember2024-apk-gbdt,ember2024-elf-gbdt,ember2024-pdf-gbdt,"
+            "ember2024-dotnet-gbdt,ember2024-all-gbdt}"
+        ),
+        "carmon_checkpoint": {"path": str(carmon), "present": carmon.is_file()},
+        "ember_gbdt": {"path": str(gbdt), "present": gbdt.is_file()},
+        "ember_feature_memmap": {"path": str(ember_vectors), "present": ember_vectors.is_file()},
+        "ember_extractor": ext,
+        "ember2024_gbdt": {"path": str(gbdt2024), "present": gbdt2024.is_file()},
+        "ember2024_win32_gbdt": {"path": str(gbdt2024_win32), "present": gbdt2024_win32.is_file()},
+        "ember2024_win64_gbdt": {"path": str(gbdt2024_win64), "present": gbdt2024_win64.is_file()},
+        "ember2024_apk_gbdt": {"path": str(gbdt2024_apk), "present": gbdt2024_apk.is_file()},
+        "ember2024_elf_gbdt": {"path": str(gbdt2024_elf), "present": gbdt2024_elf.is_file()},
+        "ember2024_pdf_gbdt": {"path": str(gbdt2024_pdf), "present": gbdt2024_pdf.is_file()},
+        "ember2024_dotnet_gbdt": {"path": str(gbdt2024_dotnet), "present": gbdt2024_dotnet.is_file()},
+        "ember2024_all_gbdt": {"path": str(gbdt2024_all), "present": gbdt2024_all.is_file()},
+        "ember2024_extractor": ext2024,
+        "same_sample_note": (
+            "EMBER2018 has no PE binaries. Same-sample Full DOS / padding "
+            "requires --pe-sample. Feature-space ASR is not PE-valid."
+        ),
+        "measurement_frame_cli": {
+            "scope_pe_corpus": (
+                "neurinspectre scope-pe-corpus <pe_dir> "
+                "--supplement-index data/ember/ember2024/capa_supplement_index.json"
+            ),
+            "audit_with_crossing": (
+                "neurinspectre audit --target ember2024-gbdt --pe-sample <dir> "
+                "--save-best-bytes --crossing-matrix --write-diagnosis"
+            ),
+            "transferability": (
+                "neurinspectre transferability <audit_dir>/audit_report.json --default-crossing"
+            ),
+            "capa_diff": "neurinspectre capa-diff-audit <audit_dir>/audit_report.json",
+            "diagnose": "neurinspectre diagnose-ember-audit <audit_dir>",
+            "pipeline_info": "neurinspectre ember-pipeline-info --target ember2024-gbdt",
+            "engagement_gaps": "neurinspectre engagement-gaps",
+            "gamma_inject": "neurinspectre gamma-inject <pe> [--gamma-donor-dir <benign_pe>]",
+        },
+    }
+
+
 def run_doctor(ctx: click.Context, **kwargs: Any) -> None:
     json_output = kwargs.get("json_output")
     as_json = bool(kwargs.get("as_json", False))
@@ -251,6 +315,18 @@ def run_doctor(ctx: click.Context, **kwargs: Any) -> None:
     }
     payload["torch_device"] = _torch_device_report()
     payload["package_hash"] = _sha256_installed_neurinspectre()
+    payload["audit"] = _audit_readiness()
+    gamma_donor = kwargs.get("gamma_donor_dir")
+    check_gamma = bool(kwargs.get("check_gamma", True))
+    if check_gamma:
+        from neurinspectre.malware.gamma_env import gamma_readiness
+
+        payload["gamma"] = gamma_readiness(
+            donor_dir=gamma_donor,
+            run_smoke_inject=bool(kwargs.get("gamma_smoke_inject", True)),
+        )
+    else:
+        payload["gamma"] = {"skipped": True}
 
     # Dependency inventory: declared (pyproject) -> installed versions.
     deps: Dict[str, Any] = {"declared": None, "installed": {}, "missing": []}
@@ -333,7 +409,12 @@ def run_doctor(ctx: click.Context, **kwargs: Any) -> None:
                 click.echo(f"GPU: {gpu}")
             if vram is not None:
                 click.echo(f"VRAM: {float(vram):.1f} GB")
-    click.echo(f"Optional deps: ember={opt.get('ember')} nuscenes={opt.get('nuscenes')} onnxruntime={opt.get('onnxruntime')}")
+    click.echo(
+        "Optional deps: "
+        f"ember={opt.get('ember')} lief={opt.get('lief')} "
+        f"lightgbm={opt.get('lightgbm')} pefile={opt.get('pefile')} "
+        f"nuscenes={opt.get('nuscenes')} onnxruntime={opt.get('onnxruntime')}"
+    )
 
     if isinstance(git, dict) and git.get("available"):
         click.echo(f"Git: commit={git.get('commit')} dirty={git.get('dirty')} branch={git.get('branch')}")
@@ -341,6 +422,86 @@ def run_doctor(ctx: click.Context, **kwargs: Any) -> None:
         click.echo("Git: not a repo (or git unavailable)")
 
     click.echo(f"Models: dir={models.get('models_dir')} stub_meta_count={models.get('stub_meta_count')}")
+    audit = payload.get("audit") or {}
+    if audit:
+        carmon = audit.get("carmon_checkpoint") or {}
+        gbdt = audit.get("ember_gbdt") or {}
+        memmap = audit.get("ember_feature_memmap") or {}
+        ext = audit.get("ember_extractor") or {}
+        gbdt2024 = audit.get("ember2024_gbdt") or {}
+        gbdt2024_win32 = audit.get("ember2024_win32_gbdt") or {}
+        gbdt2024_win64 = audit.get("ember2024_win64_gbdt") or {}
+        gbdt2024_apk = audit.get("ember2024_apk_gbdt") or {}
+        gbdt2024_elf = audit.get("ember2024_elf_gbdt") or {}
+        gbdt2024_pdf = audit.get("ember2024_pdf_gbdt") or {}
+        gbdt2024_dotnet = audit.get("ember2024_dotnet_gbdt") or {}
+        gbdt2024_all = audit.get("ember2024_all_gbdt") or {}
+        ext2024 = audit.get("ember2024_extractor") or {}
+        click.echo(
+            "Audit: "
+            f"carmon_ckpt={carmon.get('present')} "
+            f"ember_gbdt={gbdt.get('present')} "
+            f"ember_memmap={memmap.get('present')} "
+            f"extractor={ext.get('available')} "
+            f"official_reproduction={ext.get('official_reproduction')}"
+        )
+        if ext and not ext.get("available", True):
+            click.echo(f"Audit extractor: {ext.get('reasons')} — {ext.get('hint') or ''}")
+        elif ext.get("mac_inconsistent"):
+            click.echo(f"Audit extractor: {ext.get('mac_note')}")
+        click.echo(
+            "EMBER2024: "
+            f"pe={gbdt2024.get('present')} "
+            f"win32={gbdt2024_win32.get('present')} "
+            f"win64={gbdt2024_win64.get('present')} "
+            f"apk={gbdt2024_apk.get('present')} "
+            f"elf={gbdt2024_elf.get('present')} "
+            f"pdf={gbdt2024_pdf.get('present')} "
+            f"dotnet={gbdt2024_dotnet.get('present')} "
+            f"all={gbdt2024_all.get('present')} "
+            f"extractor={ext2024.get('available')} "
+            f"thrember={ext2024.get('thrember_version')} "
+            f"pefile={ext2024.get('pefile_version')} "
+            f"official_reproduction={ext2024.get('official_reproduction')}"
+        )
+        if ext2024 and not ext2024.get("available", True):
+            click.echo(
+                f"EMBER2024 extractor: {ext2024.get('reasons')} — {ext2024.get('hint') or ''}"
+            )
+        click.echo(f"Audit CLI: {audit.get('cli')}")
+        frame = audit.get("measurement_frame_cli") or {}
+        if frame:
+            click.echo("Measurement frame (PE red-team):")
+            for key in (
+                "scope_pe_corpus",
+                "audit_with_crossing",
+                "transferability",
+                "capa_diff",
+                "diagnose",
+                "pipeline_info",
+                "engagement_gaps",
+            ):
+                if frame.get(key):
+                    click.echo(f"  {key}: {frame[key]}")
+
+    gamma = payload.get("gamma") or {}
+    if gamma and not gamma.get("skipped"):
+        click.echo(
+            f"GAMMA: ready={gamma.get('ready')} "
+            f"secml={((gamma.get('secml_malware') or {}).get('available'))} "
+            f"lief={((gamma.get('lief') or {}).get('lief_version'))}"
+        )
+        donor = gamma.get("donor") or {}
+        if donor.get("resolved"):
+            click.echo(
+                f"  donor={donor.get('resolved')} "
+                f"source={donor.get('source')} n_mz={donor.get('n_mz_files')}"
+            )
+        smoke = gamma.get("smoke_inject") or {}
+        if not smoke.get("skipped"):
+            click.echo(f"  smoke_inject ok={smoke.get('ok')} error={smoke.get('error')}")
+        if gamma.get("install_hint"):
+            click.echo(f"  hint: {gamma.get('install_hint')}")
 
     if isinstance(pkg_hash, dict) and pkg_hash.get("available"):
         click.echo(f"Installed package sha256 (py): {pkg_hash.get('sha256')}")

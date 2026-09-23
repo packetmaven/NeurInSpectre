@@ -20,7 +20,7 @@ ENHANCEMENT #5:
   analysis for AI red teamers and security researchers performing
   authorized adversarial evaluation of ML systems.
 
-Version: 2.0.1 (WOOT 2026 submission aligned)
+Version: 2.0.1
 """
 
 from __future__ import annotations

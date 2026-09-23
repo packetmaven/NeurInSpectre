@@ -2,22 +2,15 @@
 set -euo pipefail
 
 # =============================================================================
-# Detection-framework paper reproduction (CCS '26 submission #1).
-#
-# Scope: this script reproduces the DETECTION paper only
-# ("NeurInSpectre: A Three-Layer Mathematical Framework for Gradient
-#  Obfuscation Detection in Adversarial Machine Learning").
-# It does NOT reproduce the companion offensive-framework paper.
-# For the offensive paper (CCS '26 submission #2, "An Offensive Framework
-# for Breaking Gradient Obfuscation..."), use scripts/reproduce_all.sh or
-# scripts/reproduce_table8.sh.
-#
+# Detection experiments (synthetic sequences + real-defense characterization).
+# The 12-defense evasion harness is scripts/reproduce_all.sh
+# (or scripts/reproduce_table8.sh for Table 8 only).
 # Output directory: results/detection/ (default; set RESULTS_DIR to override)
 # =============================================================================
 
 echo "=== NeurInSpectre Reproduction Script ==="
-echo "=== CCS '26 Artifact Harness (detection framework paper) ==="
-echo "=== For the offensive-framework paper, use: scripts/reproduce_all.sh ==="
+echo "=== Detection experiment harness ==="
+echo "=== Table 8 harness: scripts/reproduce_all.sh ==="
 echo ""
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -12,6 +12,7 @@ import logging
 import os
 import platform
 import random
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -29,6 +30,7 @@ from ..evaluation.datasets import DatasetFactory
 from ..models.factory import ModelFactory
 from ..models.loader import load_model as load_rb_model
 from ..evaluation.metrics import compute_perturbation_metrics, compute_query_efficiency
+from ..evaluation.problem_space import compute_asr_query_curve
 
 logger = logging.getLogger(__name__)
 
@@ -332,11 +334,25 @@ def load_threshold_overrides(path: str | Path) -> Dict[str, Any]:
     return dict(obj)
 
 
+def _jsonable(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {str(k): _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonable(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.bool_, np.integer, np.floating)):
+        return obj.item()
+    if torch.is_tensor(obj):
+        return obj.detach().cpu().tolist()
+    return obj
+
+
 def save_json(payload: Dict[str, Any], path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
+        json.dump(_jsonable(payload), handle, indent=2, sort_keys=True)
 
 
 def load_model(
@@ -386,6 +402,9 @@ def _load_model_from_dict(
         domain = cfg.get("domain", "vision")
         training_type = cfg.get("training_type", "standard")
         model_kwargs = dict(cfg.get("model_kwargs") or {})
+        if _looks_like_carmon(None, cfg, model_kwargs):
+            default_carmon = Path("models/cifar10/Linf/Carmon2019Unlabeled.pt")
+            return _load_carmon2019(default_carmon, device=device, cfg=cfg, model_kwargs=model_kwargs)
         # Pass through common RobustBench args if provided at top-level.
         for extra_key in ("threat_model", "model_dir"):
             if extra_key in cfg and extra_key not in model_kwargs:
@@ -413,6 +432,60 @@ def _load_model_from_dict(
     raise ValueError("Model config must include path or model_name/architecture.")
 
 
+def _looks_like_ember_gbdt(
+    path: Optional[Path] = None,
+    cfg: Optional[Dict[str, Any]] = None,
+    model_kwargs: Optional[Dict[str, Any]] = None,
+) -> bool:
+    cfg = cfg or {}
+    model_kwargs = model_kwargs or {}
+    haystacks = [
+        str(path or ""),
+        str(cfg.get("model_name") or ""),
+        str(cfg.get("loader") or ""),
+        str(cfg.get("training_type") or ""),
+        str(model_kwargs.get("loader") or ""),
+    ]
+    blob = " ".join(haystacks).lower()
+    if any(key in blob for key in ("ember_gbdt", "ember_model_2018", "lightgbm")):
+        return True
+    suffix = str(Path(path).suffix).lower() if path else ""
+    return suffix in {".txt", ".model"} and "ember" in blob
+
+
+def _looks_like_carmon(
+    path: Optional[Path] = None,
+    cfg: Optional[Dict[str, Any]] = None,
+    model_kwargs: Optional[Dict[str, Any]] = None,
+) -> bool:
+    cfg = cfg or {}
+    model_kwargs = model_kwargs or {}
+    haystacks = [
+        str(path or ""),
+        str(cfg.get("model_name") or ""),
+        str(cfg.get("architecture") or ""),
+        str(cfg.get("loader") or ""),
+        str(model_kwargs.get("model_name") or ""),
+        str(model_kwargs.get("loader") or ""),
+    ]
+    return any("carmon2019" in str(item).lower() or str(item).lower() in {"carmon", "carmon2019"} for item in haystacks)
+
+
+def _load_carmon2019(
+    path: Path,
+    *,
+    device: str,
+    cfg: Optional[Dict[str, Any]] = None,
+    model_kwargs: Optional[Dict[str, Any]] = None,
+) -> nn.Module:
+    from neurinspectre.models.wide_resnet_carmon import load_carmon2019_local
+
+    cfg = cfg or {}
+    model_kwargs = model_kwargs or {}
+    assert_clean = bool(model_kwargs.get("assert_clean_accuracy", cfg.get("assert_clean_accuracy", False)))
+    return load_carmon2019_local(str(path), device=device, assert_clean_accuracy=assert_clean)
+
+
 def _load_model_from_path(
     path: Path,
     *,
@@ -424,6 +497,27 @@ def _load_model_from_path(
     cfg = cfg or {}
     if not path.exists():
         raise FileNotFoundError(f"Model file not found: {path}")
+
+    if _looks_like_ember_gbdt(path, cfg, model_kwargs):
+        blob = " ".join(
+            str(v).lower()
+            for v in [
+                path,
+                cfg.get("model_name"),
+                cfg.get("loader"),
+                model_kwargs.get("loader"),
+            ]
+        )
+        if "2024" in blob or "thrember" in blob or "ember2024" in blob:
+            from neurinspectre.models.ember_gbdt import EmberGBDT2024
+
+            return EmberGBDT2024.from_file(path)
+        from neurinspectre.models.ember_gbdt import EmberGBDT
+
+        return EmberGBDT.from_file(path)
+
+    if _looks_like_carmon(path, cfg, model_kwargs):
+        return _load_carmon2019(path, device=device, cfg=cfg, model_kwargs=model_kwargs)
 
     if path.suffix.lower() == ".onnx":
         return _load_onnx_model(path, device=device)
@@ -583,6 +677,7 @@ def load_dataset(
     split: str = "test",
     download: bool = True,
     device: Optional[str] = None,
+    filter_label: Optional[int] = None,
 ) -> Tuple[DataLoader, torch.Tensor, torch.Tensor]:
     name = str(dataset_name).lower()
     pin_memory = _should_pin_memory(device)
@@ -615,6 +710,8 @@ def load_dataset(
         # Only CIFAR-10 supports implicit download via torchvision.
         if name == "cifar10":
             kwargs["download"] = bool(download)
+        if name == "ember" and filter_label is not None:
+            kwargs["filter_label"] = int(filter_label)
         return DatasetFactory.get_dataset(name, **kwargs)
     if name == "nuscenes":
         kwargs = {
@@ -807,7 +904,7 @@ def build_defense(
     *,
     device: str,
 ) -> Optional[nn.Module]:
-    if defense_name in {None, "", "none"}:
+    if defense_name in {None, "", "none", "identity", "id"}:
         return None
     params = params or {}
     key = str(defense_name).lower()
@@ -895,6 +992,7 @@ def evaluate_attack_runner(
     save_dir: Optional[str] = None,
     norm: str = "Linf",
     progress_callback: Optional[Any] = None,
+    query_budgets: Optional[Any] = None,
 ) -> Dict[str, Any]:
     eval_model.eval()
     total = 0
@@ -909,6 +1007,30 @@ def evaluate_attack_runner(
     per_sample_queries: list[int] = []
     per_sample_success: list[bool] = []
     batch_index = 0
+    last_meta: Dict[str, Any] = {}
+    forward_passes = 0
+    wall_t0 = time.perf_counter()
+    peak_vram_bytes = None
+    if str(device).startswith("cuda") and torch.cuda.is_available():
+        try:
+            torch.cuda.reset_peak_memory_stats()
+        except Exception:
+            pass
+
+    def _count_forward(_mod, _inp, _out):
+        nonlocal forward_passes
+        forward_passes += 1
+
+    hooks = []
+    seen_ids = set()
+    for candidate in (eval_model, getattr(runner, "model", None)):
+        if candidate is None or id(candidate) in seen_ids:
+            continue
+        try:
+            hooks.append(candidate.register_forward_hook(_count_forward))
+            seen_ids.add(id(candidate))
+        except Exception:
+            continue
 
     save_path = Path(save_dir) if save_dir else None
     if save_path:
@@ -983,6 +1105,8 @@ def evaluate_attack_runner(
         # Query accounting (Tier 3 evidence): SquareAttack and other query-based
         # runners may expose per-sample counts via AttackResult.metadata["queries_used"].
         meta = getattr(result, "metadata", None)
+        if isinstance(meta, dict):
+            last_meta = dict(meta)
         if isinstance(meta, dict) and meta.get("queries_used") is not None:
             q = meta.get("queries_used")
             try:
@@ -1032,6 +1156,18 @@ def evaluate_attack_runner(
 
         batch_index += 1
 
+    for handle in hooks:
+        try:
+            handle.remove()
+        except Exception:
+            pass
+
+    if str(device).startswith("cuda") and torch.cuda.is_available():
+        try:
+            peak_vram_bytes = int(torch.cuda.max_memory_allocated())
+        except Exception:
+            peak_vram_bytes = None
+
     clean_accuracy = clean_correct / total if total > 0 else 0.0
     robust_accuracy = adv_correct / total if total > 0 else 0.0
     attack_success_rate = success_total / clean_correct if clean_correct > 0 else 0.0
@@ -1070,7 +1206,13 @@ def evaluate_attack_runner(
         iterations_mean = float(iter_arr.mean())
         query_summary["mean_iterations"] = iterations_mean
 
-    return {
+    cost = {
+        "wall_time_s": float(time.perf_counter() - wall_t0),
+        "forward_passes": int(forward_passes),
+        "queries": queries_mean,
+        "peak_vram_bytes": peak_vram_bytes,
+    }
+    out = {
         "clean_accuracy": float(clean_accuracy),
         "robust_accuracy": float(robust_accuracy),
         "compromise_rate": float(compromise_rate),
@@ -1085,4 +1227,35 @@ def evaluate_attack_runner(
         "query_efficiency": query_summary,
         "queries": queries_mean,
         "iterations": iterations_mean,
+        "cost": cost,
     }
+    if last_meta:
+        out["attack_metadata"] = last_meta
+        for key in (
+            "aa_subattacks_skipped",
+            "aa_skip_reasons",
+            "gradient_unavailable",
+            "aa_all_gradient_skipped",
+            "chosen_attack",
+            "selected_attack_impl",
+            "backend",
+            "access",
+            "query_floor_relaxed",
+            "realizable",
+            "space",
+        ):
+            if key in last_meta:
+                out[key] = last_meta[key]
+    budgets = query_budgets
+    if budgets is None:
+        budgets = [100, 500, 2000, 5000]
+    if per_sample_queries and per_sample_success:
+        curve = compute_asr_query_curve(per_sample_queries, per_sample_success, list(budgets))
+        if curve:
+            out["query_curve"] = curve
+    for key in ("chosen_attack", "selected_attack_impl"):
+        if key not in out and getattr(runner, key, None):
+            out[key] = getattr(runner, key)
+    if "backend" not in out and hasattr(runner, "_backend"):
+        out["backend"] = runner._backend
+    return out

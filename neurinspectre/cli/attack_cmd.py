@@ -16,7 +16,7 @@ Cross-ref: Paper Section 4 "Implementation"
 Cross-ref: Paper Table 1 "Attack success rate against evaluated defenses"
 Cross-ref: Paper Algorithm 2 "NEURINSPECTRE Adaptive Attack"
 
-Version: 2.0.1 (WOOT 2026 submission aligned - all issues resolved)
+Version: 2.0.1
 """
 
 from __future__ import annotations

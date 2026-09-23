@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """
-Reproduce Table 4 (Gradient Inversion SSIM on CIFAR-10) from the CCS '26
-offensive paper:
+Gradient-inversion SSIM on CIFAR-10 (Table 4).
 
-    "NeurInSpectre: An Offensive Framework for Breaking Gradient Obfuscation
-     in AI Safety Systems via Spectral-Volterra-Krylov Analysis"
-
-Paper Table 4 claim:
+Table 4 claim:
 
     Method                Unscreened   Screened   Speedup
     -------------------   ----------   --------   -------
@@ -176,7 +172,7 @@ def _summarize(samples: List[Dict[str, Any]]) -> Dict[str, float]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Reproduce CCS '26 offensive paper Table 4 (gradient inversion SSIM, CIFAR-10)"
+        description="Gradient-inversion SSIM on CIFAR-10 (Table 4)"
     )
     parser.add_argument(
         "--n-samples", type=int, default=20,
@@ -224,8 +220,7 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 72)
-    print(" CCS '26 offensive paper — Table 4 reproduction")
-    print(" Gradient inversion fidelity (SSIM) on CIFAR-10")
+    print(" Table 4 — gradient inversion fidelity (SSIM) on CIFAR-10")
     print("=" * 72)
     print(f" N samples             : {args.n_samples}")
     print(f" Max iterations        : {args.max_iter}")

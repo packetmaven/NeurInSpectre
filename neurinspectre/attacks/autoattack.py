@@ -4,15 +4,57 @@ AutoAttack ensemble implementation.
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List
 
 import numpy as np
 import torch
 import torch.nn as nn
 
 from .apgd import APGD
+from .base_interface import APGDTargeted, AttackConfig
 from .fab import FABEnsemble
-from .square import SquareAttack
+from .square import SquareAttack, SquareAttackL2
+
+
+_GRADIENT_SUBATTACKS = frozenset({"apgd-ce", "apgd-dlr", "apgd-t", "apgd-md", "fab"})
+
+
+class _APGDTargetedAdapter:
+    """Make ``APGDTargeted.run`` look like the callable APGD/FAB interface."""
+
+    def __init__(
+        self,
+        model: nn.Module,
+        *,
+        eps: float,
+        norm: str,
+        device: str,
+        n_target_classes: int = 9,
+        steps: int = 100,
+        n_restarts: int = 1,
+    ):
+        cfg = AttackConfig(
+            norm=norm,
+            epsilon=float(eps),
+            n_iterations=int(steps),
+            n_restarts=int(n_restarts),
+            loss="ce",
+        )
+        self.model = model
+        self._inner = APGDTargeted(cfg, device=device, n_target_classes=int(n_target_classes))
+
+    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        result = self._inner.run(self.model, x, y, targeted=True)
+        return result.x_adv
+
+
+def _square_for_norm(model: nn.Module, *, eps: float, norm: str, n_queries: int, device: str):
+    norm_key = str(norm).lower().replace("_", "")
+    if norm_key in {"linf", "inf", "l∞"}:
+        return SquareAttack(model, eps=eps, n_queries=n_queries, device=device)
+    if norm_key in {"l2", "2"}:
+        return SquareAttackL2(model, eps=eps, n_queries=n_queries, device=device)
+    return None
 
 
 def _project_lp(
@@ -129,12 +171,19 @@ class AutoAttack:
                     n_restarts=1,
                     device=self.device,
                 ),
+                "apgd-t": _APGDTargetedAdapter(
+                    self.model,
+                    eps=self.eps,
+                    norm=self.norm,
+                    device=self.device,
+                    n_target_classes=9,
+                    steps=100,
+                    n_restarts=1,
+                ),
                 "fab": FABEnsemble(self.model, norm=self.norm, device=self.device),
-                "square": SquareAttack(
-                    self.model, eps=self.eps, n_queries=5000, device=self.device
-                )
-                if self.norm == "linf"
-                else None,
+                "square": _square_for_norm(
+                    self.model, eps=self.eps, norm=self.norm, n_queries=5000, device=self.device
+                ),
             }
         elif self.version == "plus":
             self.attacks = {
@@ -165,12 +214,19 @@ class AutoAttack:
                     n_restarts=1,
                     device=self.device,
                 ),
+                "apgd-t": _APGDTargetedAdapter(
+                    self.model,
+                    eps=self.eps,
+                    norm=self.norm,
+                    device=self.device,
+                    n_target_classes=9,
+                    steps=100,
+                    n_restarts=1,
+                ),
                 "fab": FABEnsemble(self.model, norm=self.norm, device=self.device),
-                "square": SquareAttack(
-                    self.model, eps=self.eps, n_queries=10000, device=self.device
-                )
-                if self.norm == "linf"
-                else None,
+                "square": _square_for_norm(
+                    self.model, eps=self.eps, norm=self.norm, n_queries=10000, device=self.device
+                ),
             }
         elif self.version == "rand":
             self.attacks = {
@@ -221,6 +277,8 @@ class AutoAttack:
 
         asr_per_attack = {}
         samples_per_attack = {}
+        skipped: List[str] = []
+        skip_reasons: Dict[str, str] = {}
 
         for attack_name, attack in attacks.items():
             if verbose:
@@ -264,6 +322,8 @@ class AutoAttack:
                         )
                     asr_per_attack[attack_name] = 0.0
                     samples_per_attack[attack_name] = 0
+                    skipped.append(attack_name)
+                    skip_reasons[attack_name] = "gradient_unavailable"
                     continue
                 raise
 
@@ -297,6 +357,8 @@ class AutoAttack:
 
         total_asr = is_adversarial.float().mean().item()
         robust_accuracy = 1.0 - total_asr
+        gradient_names = [name for name in attacks if name in _GRADIENT_SUBATTACKS]
+        gradient_skipped = [name for name in skipped if name in _GRADIENT_SUBATTACKS]
 
         metrics = {
             "robust_accuracy": robust_accuracy,
@@ -304,6 +366,10 @@ class AutoAttack:
             "asr_per_attack": asr_per_attack,
             "samples_adversarial_per_attack": samples_per_attack,
             "total_adversarial": is_adversarial.sum().item(),
+            "aa_subattacks_skipped": list(skipped),
+            "aa_skip_reasons": dict(skip_reasons),
+            "gradient_unavailable": bool(gradient_skipped),
+            "aa_all_gradient_skipped": bool(gradient_names) and len(gradient_skipped) == len(gradient_names),
         }
 
         if verbose:
