@@ -2,7 +2,9 @@
 
 Operator guide for **written ROE** engagements against static PE scorers (EMBER 2018 / 2024 LightGBM). Use `venv/bin/neurinspectre` (Python 3.10).
 
-A longer engagement playbook (vision, Table 5, design-target modules) may exist locally under `results/offensive_overnight_20260920/REDTEAM_PLAYBOOK.md` (not shipped in git; `results/` is ignored).
+Full multi-engagement playbook (vision, Table 5, Capa lane, design-target modules):
+[REDTEAM_PLAYBOOK.md](REDTEAM_PLAYBOOK.md). A frozen working copy may also exist under
+`results/offensive_overnight_20260920/` (gitignored).
 
 ## Two frames (SOW closeout)
 

@@ -278,8 +278,8 @@ models). Both frames can be honest; only the second is what this CLI produces.
 first-class targets. Public EMBER releases (2018 and 2024) do not ship PE
 binaries; same-sample work requires `--pe-sample`.
 
-Authorized red-team workflow (measurement frame, preflight, crossing matrix):
-[docs/guides/AUTHORIZED_REDTEAM_EMBER.md](docs/guides/AUTHORIZED_REDTEAM_EMBER.md).
+Authorized red-team docs: [EMBER audit quickstart](docs/guides/AUTHORIZED_REDTEAM_EMBER.md) ·
+[full engagement playbook](docs/guides/REDTEAM_PLAYBOOK.md) (measurement frame, preflight, crossing matrix).
 
 ```bash
 neurinspectre scope-pe-corpus ./pe \

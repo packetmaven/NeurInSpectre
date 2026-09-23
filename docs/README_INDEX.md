@@ -1,5 +1,10 @@
 # README Index (Complete)
 
+## Authorized red team (EMBER / vision)
+
+- [AUTHORIZED_REDTEAM_EMBER.md](guides/AUTHORIZED_REDTEAM_EMBER.md) — EMBER GBDT same-sample audit, `measurement_scope`, crossing matrix.
+- [REDTEAM_PLAYBOOK.md](guides/REDTEAM_PLAYBOOK.md) — full engagement playbook (vision, malware, Table 5, EMBER 2024 lane).
+
 ## Operations Quickstart (Verified)
 
 - One-time local setup (recommended):
