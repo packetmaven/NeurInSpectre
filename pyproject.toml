@@ -103,6 +103,15 @@ malware = [
     "pefile",
     "lief>=0.13,<0.14",
 ]
+# GAMMA section injection (secml-malware). Conflicts with EMBER2018 official lief 0.9.0;
+# use a dedicated venv for gamma audits (EMBER2024/thrember is pefile-only).
+gamma = [
+    "secml-malware==0.4.2",
+    "secml>=0.15,<0.16",
+    "deap>=1.3",
+    "python-magic>=0.4.27",
+    "lief>=0.13,<0.15",
+]
 viz = [
     "jupyter>=1.0.0",
     "ipywidgets>=7.7.0",

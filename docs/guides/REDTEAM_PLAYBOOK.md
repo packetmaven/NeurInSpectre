@@ -127,6 +127,27 @@ venv/bin/neurinspectre audit --target ember2024-gbdt \
   --capa-diff-best --capa-diff-backend file_level \
   -o results/audit/ember2024_capa_diff_smoke
 
+# One-shot operator bundle: scope + audit + diagnosis + crossing + zip
+venv/bin/neurinspectre redteam-bundle /client/malware_pe \
+  -o results/audit/ember2024_client_bundle \
+  --target ember2024-gbdt --require-detected \
+  --query-budgets 10,50,100,500,5000
+
+# Read-only VT-style metadata (challenge JSONL lookup by SHA; no live submit)
+venv/bin/neurinspectre vt-sidecar /client/malware_pe -o results/vt_sidecar.json
+venv/bin/neurinspectre audit --target ember2024-gbdt --pe-sample /client/malware_pe \
+  --vt-sidecar results/vt_sidecar.json --write-diagnosis ...
+
+# Bounded IAT edits (default: API name case toggle; DLL case is usually a thrember no-op)
+venv/bin/neurinspectre iat-probe /client/malware_pe/sample.exe
+venv/bin/neurinspectre audit --target ember2024-gbdt --pe-sample /client/malware_pe \
+  --enable-iat-edits --require-detected ...
+
+# SOW adapters (export only — no in-process sandbox or AV API)
+venv/bin/neurinspectre audit ... --save-best-bytes \
+  --sow-adapter sandbox_handoff
+# commercial_av_edr placeholder requires --sow-adapter-ack and --av-system-name
+
 # Compact ledger cell for slides / SOW appendix
 python scripts/diagnose_ember_audit.py results/audit/ember2024_client
 
@@ -136,6 +157,19 @@ venv/bin/neurinspectre transferability results/audit/ember2024_client/audit_repo
 ```
 
 `--crossing-matrix` and `--capa-diff-best` **require** `--save-best-bytes` (fail fast at CLI start).
+
+**GAMMA section injection (secml-malware; separate venv from EMBER2018 lief 0.9.0)**
+
+```bash
+pip install -e '.[gamma]'
+neurinspectre doctor   # smoke inject + donor preflight
+neurinspectre gamma-inject /client/malware_pe/sample.exe --gamma-donor-dir /client/benign_pe
+neurinspectre audit --target ember2024-gbdt --pe-sample /client/malware_pe \
+  --enable-gamma-sections --gamma-donor-dir /client/benign_pe \
+  --require-detected --query-budgets 10,50,100,500,5000 -o results/audit/ember2024_gamma
+```
+
+Use a **real benign PE donor corpus** (not pip `goodware_samples` text stubs). With `--enable-gamma-sections`, `measurement_scope` records GAMMA as measured; overlay `--benign-corpus` padding is still a different transform.
 
 **EMBER 2018 official cell (Elastic reproduction, not Mac `audit`)**
 
@@ -162,7 +196,7 @@ On the reference 148-file corpus, a recent smoke with `--query-budgets 10,50` on
 
 **Client takeaway:** feature-space ASR is not a PE-valid red-team finding. A parse-valid ASR of zero with documented closest approach is a defensible result. Do not conflate with “Defender missed it” unless the SOW includes that system.
 
-**Engagement gaps (documented, not CLI attack primitives):** GAMMA **section** injection, import-table / IAT rewrites, dummy call-site / graph-model attacks, sandbox “still executes,” commercial AV/EDR scoring. Every EMBER `audit_report.json` stamps these under `measurement_scope.not_measured`. Operator catalog:
+**Engagement gaps:** GAMMA section injection (`--enable-gamma-sections`), bounded IAT case toggles (`--enable-iat-edits`), graph/byte models, sandbox execution, and commercial AV/EDR are listed under `measurement_scope.not_measured` until the matching flag or SOW adapter is enabled. VT ratios come from a **read-only** sidecar (`vt-sidecar` / `--vt-sidecar`), not live VirusTotal. Sandbox handoff copies `best_bytes` for customer VMs; it does not execute samples. Operator catalog:
 
 ```bash
 neurinspectre engagement-gaps

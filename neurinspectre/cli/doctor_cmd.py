@@ -298,6 +298,7 @@ def _audit_readiness() -> Dict[str, Any]:
             "diagnose": "neurinspectre diagnose-ember-audit <audit_dir>",
             "pipeline_info": "neurinspectre ember-pipeline-info --target ember2024-gbdt",
             "engagement_gaps": "neurinspectre engagement-gaps",
+            "gamma_inject": "neurinspectre gamma-inject <pe> [--gamma-donor-dir <benign_pe>]",
         },
     }
 
@@ -315,6 +316,17 @@ def run_doctor(ctx: click.Context, **kwargs: Any) -> None:
     payload["torch_device"] = _torch_device_report()
     payload["package_hash"] = _sha256_installed_neurinspectre()
     payload["audit"] = _audit_readiness()
+    gamma_donor = kwargs.get("gamma_donor_dir")
+    check_gamma = bool(kwargs.get("check_gamma", True))
+    if check_gamma:
+        from neurinspectre.malware.gamma_env import gamma_readiness
+
+        payload["gamma"] = gamma_readiness(
+            donor_dir=gamma_donor,
+            run_smoke_inject=bool(kwargs.get("gamma_smoke_inject", True)),
+        )
+    else:
+        payload["gamma"] = {"skipped": True}
 
     # Dependency inventory: declared (pyproject) -> installed versions.
     deps: Dict[str, Any] = {"declared": None, "installed": {}, "missing": []}
@@ -471,6 +483,25 @@ def run_doctor(ctx: click.Context, **kwargs: Any) -> None:
             ):
                 if frame.get(key):
                     click.echo(f"  {key}: {frame[key]}")
+
+    gamma = payload.get("gamma") or {}
+    if gamma and not gamma.get("skipped"):
+        click.echo(
+            f"GAMMA: ready={gamma.get('ready')} "
+            f"secml={((gamma.get('secml_malware') or {}).get('available'))} "
+            f"lief={((gamma.get('lief') or {}).get('lief_version'))}"
+        )
+        donor = gamma.get("donor") or {}
+        if donor.get("resolved"):
+            click.echo(
+                f"  donor={donor.get('resolved')} "
+                f"source={donor.get('source')} n_mz={donor.get('n_mz_files')}"
+            )
+        smoke = gamma.get("smoke_inject") or {}
+        if not smoke.get("skipped"):
+            click.echo(f"  smoke_inject ok={smoke.get('ok')} error={smoke.get('error')}")
+        if gamma.get("install_hint"):
+            click.echo(f"  hint: {gamma.get('install_hint')}")
 
     if isinstance(pkg_hash, dict) and pkg_hash.get("available"):
         click.echo(f"Installed package sha256 (py): {pkg_hash.get('sha256')}")

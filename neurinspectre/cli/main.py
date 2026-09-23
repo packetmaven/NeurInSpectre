@@ -57,6 +57,10 @@ _CLICK_COMMANDS = {
     "capa-diff-audit",
     "ember-pipeline-info",
     "engagement-gaps",
+    "gamma-inject",
+    "iat-probe",
+    "vt-sidecar",
+    "redteam-bundle",
 }
 
 
@@ -1527,6 +1531,29 @@ def table2_smoke_cmd(ctx: click.Context, **kwargs) -> None:
                    "mbc=only Malware Behavior Catalog-tagged rules.")
 @click.option("--capa-rules-dir", type=click.Path(), default=None,
               help="Override capa-rules directory (default: $CAPA_RULES or data/capa-rules)")
+@click.option("--enable-iat-edits/--no-iat-edits", default=False,
+              help="Bounded import-table edits (ASCII case toggle on one DLL name). "
+                   "Same audit frame as overlay/Full DOS; does not add imports or "
+                   "change .text.")
+@click.option("--vt-sidecar", type=click.Path(exists=True), default=None,
+              help="Read-only VT-style metadata JSON keyed by SHA-256 (or wrapper "
+                   "with a records map). Never submits to VirusTotal.")
+@click.option("--sow-adapter", multiple=True, default=(),
+              help="Post-audit SOW adapter: sandbox_handoff (copy best_bytes only) "
+                   "or commercial_av_edr (provenance placeholder; requires ack).")
+@click.option("--sow-adapter-ack", is_flag=True,
+              help="Legal/SOW acknowledgment for commercial_av_edr adapter "
+                   "(or set NEURINSPECTRE_SOW_ADAPTER_ACK=1).")
+@click.option("--av-system-name", default=None,
+              help="Named AV/EDR system for commercial_av_edr placeholder JSON only.")
+@click.option("--enable-gamma-sections/--no-gamma-sections", default=False,
+              help="GAMMA section injection via secml-malware (requires pip install "
+                   "neurinspectre[gamma]). Not overlay padding.")
+@click.option("--gamma-donor-dir", type=click.Path(exists=True), default=None,
+              help="Benign PE directory for GAMMA donor sections (default: secml "
+                   "bundled goodware_samples when present).")
+@click.option("--gamma-sections-per-population", type=int, default=5, show_default=True,
+              help="How many donor sections to cache per audit sample search.")
 @click.option("--enable-section-slack/--no-section-slack", default=False,
               help="Add C7 section-slack padding to the problem-space transform mix. "
                    "Writes into file-alignment slack of the last section; preserves "
@@ -1726,6 +1753,96 @@ def score_ember2024_challenge_cmd(
             f"({cell['detected_ge_0.5']/n:.3f})  median={cell['median_p']:.4f}"
         )
     click.echo(f"  n_miss_all_models: {summary['n_miss_all_models']}")
+
+
+@cli.command("vt-sidecar")
+@click.argument("pe_path", type=click.Path(exists=True))
+@click.option(
+    "--dataset-dir",
+    type=click.Path(exists=True),
+    default=None,
+    help="EMBER2024 challenge JSONL tree (default: data/ember/ember2024/dataset/challenge)",
+)
+@click.option("--output", "-o", type=click.Path(), required=True, help="Write vt_sidecar JSON")
+def vt_sidecar_cmd(pe_path, dataset_dir, output):
+    """Build a read-only VT metadata sidecar from local PE hashes (no live submit)."""
+    import json as _json
+    from pathlib import Path
+
+    from neurinspectre.malware.vt_sidecar import build_vt_sidecar_from_pe_dir
+
+    payload = build_vt_sidecar_from_pe_dir(
+        Path(pe_path),
+        dataset_dir=Path(dataset_dir) if dataset_dir else None,
+    )
+    out = Path(output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+    click.echo(
+        f"wrote {out} n_files={payload.get('n_files')} "
+        f"n_with_detection_ratio={payload.get('n_with_detection_ratio')}"
+    )
+
+
+@cli.command("redteam-bundle")
+@click.argument("pe_sample", type=click.Path(exists=True))
+@click.option("--output-dir", "-o", type=click.Path(), required=True, help="Audit output directory")
+@click.option("--target", default="ember2024-gbdt", show_default=True)
+@click.option("--smoke", is_flag=True, help="Short budgets and small n")
+@click.option("--n-examples", type=int, default=8, show_default=True)
+@click.option("--query-budgets", default=None, help="Comma-separated query budgets")
+@click.option("--enable-gamma-sections/--no-gamma-sections", default=False)
+@click.option("--gamma-donor-dir", type=click.Path(exists=True), default=None)
+@click.option("--enable-iat-edits/--no-iat-edits", default=False)
+@click.option("--require-detected", is_flag=True)
+@click.option("--supplement-index", type=click.Path(exists=True), default=None)
+@click.option("--challenge-dir", type=click.Path(exists=True), default=None)
+@click.option("--vt-dataset-dir", type=click.Path(exists=True), default=None)
+@click.option("--no-vt-sidecar", is_flag=True, help="Skip building vt_sidecar.json")
+@click.option("--sow-adapter", multiple=True, default=())
+@click.option("--sow-adapter-ack", is_flag=True)
+@click.option("--av-system-name", default=None)
+def redteam_bundle_cmd(
+    pe_sample,
+    output_dir,
+    target,
+    smoke,
+    n_examples,
+    query_budgets,
+    enable_gamma_sections,
+    gamma_donor_dir,
+    enable_iat_edits,
+    require_detected,
+    supplement_index,
+    challenge_dir,
+    vt_dataset_dir,
+    no_vt_sidecar,
+    sow_adapter,
+    sow_adapter_ack,
+    av_system_name,
+):
+    """Operator bundle: scope → audit → diagnosis → crossing → zip (no new science)."""
+    from neurinspectre.cli.redteam_bundle_cmd import run_redteam_bundle
+
+    run_redteam_bundle(
+        pe_sample=pe_sample,
+        output_dir=output_dir,
+        target=target,
+        smoke=smoke,
+        n_examples=n_examples,
+        query_budgets=query_budgets,
+        enable_gamma_sections=enable_gamma_sections,
+        gamma_donor_dir=gamma_donor_dir,
+        enable_iat_edits=enable_iat_edits,
+        require_detected=require_detected,
+        supplement_index=supplement_index,
+        challenge_dir=challenge_dir,
+        vt_dataset_dir=vt_dataset_dir,
+        build_vt_sidecar=not no_vt_sidecar,
+        sow_adapter=list(sow_adapter) if sow_adapter else None,
+        sow_adapter_ack=sow_adapter_ack,
+        av_system_name=av_system_name,
+    )
 
 
 @cli.command("scope-pe-corpus")
@@ -2406,6 +2523,70 @@ def capa_diff_audit_cmd(report, output, capa_rules_dir, capa_diff_backend, max_s
     )
 
 
+@cli.command("iat-probe")
+@click.argument("pe_path", type=click.Path(exists=True))
+@click.option("--json/--no-json", "as_json", default=True, show_default=True)
+def iat_probe_cmd(pe_path, as_json):
+    """Probe bounded IAT primitives vs thrember ImportsInfo (no audit spend)."""
+    import json as _json
+    from pathlib import Path
+
+    from neurinspectre.malware.iat_transforms import probe_iat_primitives
+
+    raw = Path(pe_path).read_bytes()
+    if raw[:2] != b"MZ":
+        raise click.ClickException("not a PE file (missing MZ)")
+    report = probe_iat_primitives(raw)
+    if as_json:
+        click.echo(_json.dumps(report, indent=2))
+    else:
+        click.echo(
+            f"api_sites={report['n_api_sites']} dll_sites={report['n_dll_sites']}"
+        )
+        for row in report.get("primitives") or []:
+            click.echo(
+                f"  {row.get('primitive')}: ok={row.get('ok')} "
+                f"L1={row.get('import_feature_l1')}"
+            )
+
+
+@cli.command("gamma-inject")
+@click.argument("pe_path", type=click.Path(exists=True))
+@click.option("--gamma-donor-dir", type=click.Path(exists=True), default=None,
+              help="Benign PE donors (default: secml bundled goodware)")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write mutated PE (default: <pe>.gamma.bin beside input)")
+@click.option("--inject-fraction", type=float, default=1.0, show_default=True,
+              help="Fraction of each injected section content to copy (0,1].")
+def gamma_inject_cmd(pe_path, gamma_donor_dir, output, inject_fraction):
+    """One-shot GAMMA section injection smoke (secml-malware); for operator debugging."""
+    from pathlib import Path
+    from neurinspectre.malware.gamma_env import resolve_gamma_donor_dir
+    from neurinspectre.malware.gamma_section import (
+        gamma_secml_status,
+        inject_gamma_sections,
+        load_section_population,
+    )
+    from neurinspectre.malware.pe_transforms import evaluate_transform_validity
+
+    if not gamma_secml_status().get("available"):
+        raise click.ClickException("Install neurinspectre[gamma] (secml-malware) first.")
+    src = Path(pe_path)
+    raw = src.read_bytes()
+    donor, _tag = resolve_gamma_donor_dir(gamma_donor_dir)
+    if donor is None:
+        raise click.ClickException("No donor dir; pass --gamma-donor-dir or install secml goodware.")
+    population, _meta = load_section_population(donor, how_many=5)
+    mutated = inject_gamma_sections(
+        raw, population, seed=42, inject_fraction=float(inject_fraction)
+    )
+    gate = evaluate_transform_validity(raw, mutated, kind="gamma_section")
+    out = Path(output) if output else src.with_suffix(src.suffix + ".gamma.bin")
+    out.write_bytes(mutated)
+    click.echo(f"wrote {out} ({len(raw)} -> {len(mutated)} bytes)")
+    click.echo(f"validity passed={gate.get('passed')} reasons={gate.get('reasons')}")
+
+
 @cli.command("engagement-gaps")
 @click.option("--json/--no-json", "as_json", default=True, show_default=True,
               help="Print engagement gap catalog as JSON")
@@ -2458,6 +2639,18 @@ def ember_pipeline_info_cmd(target, device, as_json):
     help="Models directory to scan for stub metadata",
 )
 @click.option("--check-models/--no-check-models", default=True, help="Scan models dir for stub markers")
+@click.option(
+    "--gamma-donor-dir",
+    type=click.Path(exists=True),
+    default=None,
+    help="Benign PE dir for GAMMA donor preflight (optional)",
+)
+@click.option("--check-gamma/--no-check-gamma", default=True, help="Report secml GAMMA readiness")
+@click.option(
+    "--gamma-smoke-inject/--no-gamma-smoke-inject",
+    default=True,
+    help="Run one minimal GAMMA inject when secml is installed",
+)
 @click.pass_context
 def doctor_cli_cmd(ctx: click.Context, **kwargs) -> None:
     """Environment + dependency sanity checks (no network)."""

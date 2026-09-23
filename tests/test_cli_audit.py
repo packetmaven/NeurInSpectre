@@ -28,6 +28,9 @@ def test_audit_help_exposes_ember_same_sample_flags():
     assert "--crossing-matrix" in result.output
     assert "--capa-diff-best" in result.output
     assert "--write-diagnosis" in result.output
+    assert "--enable-gamma-sections" in result.output
+    assert "--enable-iat-edits" in result.output
+    assert "--vt-sidecar" in result.output
 
 
 def test_measurement_frame_commands_registered():
@@ -39,6 +42,10 @@ def test_measurement_frame_commands_registered():
         "capa-diff-audit",
         "ember-pipeline-info",
         "engagement-gaps",
+        "gamma-inject",
+        "vt-sidecar",
+        "redteam-bundle",
+        "iat-probe",
     ):
         assert name in _CLICK_COMMANDS
 

@@ -5,8 +5,8 @@ Implemented here (literature names, not a secml-malware wrap):
   - Padding / overlay (Kolosnjaji et al.)
   - GAMMA-padding when the payload is copied from benign PEs
 
-GAMMA *section* injection is not implemented. If secml-malware is installed we
-only record that fact.
+GAMMA *section* injection uses secml-malware when ``enable_gamma_sections`` is set.
+Overlay ``gamma_padding`` is still not section injection.
 """
 
 from __future__ import annotations
@@ -31,14 +31,13 @@ from ..malware.pe_transforms import (
 
 
 def try_import_secml_gamma() -> Optional[Any]:
-    try:
-        from secml_malware.attack.blackbox.c_gamma_sections_evasion import (  # type: ignore
-            CGammaSectionsEvasionAttack,
-        )
+    from ..malware.gamma_section import gamma_secml_status
 
-        return CGammaSectionsEvasionAttack
-    except Exception:
-        return None
+    if gamma_secml_status().get("available"):
+        from ..malware.gamma_section import _require_gamma_problem
+
+        return _require_gamma_problem()
+    return None
 
 
 def predict_malware(model, features) -> tuple:
@@ -235,6 +234,10 @@ class ProblemSpacePESearch:
         transform_set: str = "default",
         supplement_payloads: Optional[Sequence[bytes]] = None,
         fulldos_quiet_only: bool = False,
+        enable_gamma_sections: bool = False,
+        gamma_donor_dir: Optional[Path] = None,
+        gamma_sections_per_population: int = 5,
+        enable_iat_edits: bool = False,
     ):
         self.model = model
         self.n_queries = int(n_queries)
@@ -283,6 +286,29 @@ class ProblemSpacePESearch:
         self._capa_error: Optional[str] = None
         self.n_capa_rejects: int = 0
         self.n_capa_calls: int = 0
+        self.enable_gamma_sections = bool(enable_gamma_sections)
+        self.gamma_donor_dir = Path(gamma_donor_dir) if gamma_donor_dir else None
+        self.gamma_sections_per_population = int(gamma_sections_per_population)
+        self._gamma_section_population: Optional[List[List[int]]] = None
+        self.n_gamma_attempts: int = 0
+        self.n_gamma_failures: int = 0
+        if self.enable_gamma_sections:
+            from ..malware.gamma_env import resolve_gamma_donor_dir
+            from ..malware.gamma_section import load_section_population
+
+            resolved, _src = resolve_gamma_donor_dir(self.gamma_donor_dir)
+            if resolved is None:
+                raise ValueError(
+                    "enable_gamma_sections requires --gamma-donor-dir or secml bundled goodware"
+                )
+            self._gamma_section_population, _ = load_section_population(
+                resolved, how_many=self.gamma_sections_per_population
+            )
+            self.gamma_donor_dir = resolved
+        self.enable_iat_edits = bool(enable_iat_edits)
+        self.n_iat_attempts: int = 0
+        self.n_iat_failures: int = 0
+        self.n_iat_no_feature_delta: int = 0
 
     def _capa_baseline(self, pe_bytes: bytes):
         """Compute the capability set (or restricted subset per ``capa_preserve_mode``)
@@ -371,6 +397,10 @@ class ProblemSpacePESearch:
         self.n_section_slack_attempts = 0
         self.n_section_slack_no_capacity = 0
         self.n_combined_attempts = 0
+        self.n_gamma_attempts = 0
+        self.n_gamma_failures = 0
+        self.n_iat_attempts = 0
+        self.n_iat_failures = 0
         rng = rng or np.random.default_rng(self.seed)
         extracted0 = extract_ember_features(pe_bytes, extractor=self.extractor)
         if extracted0.get("features") is None:
@@ -428,6 +458,33 @@ class ProblemSpacePESearch:
             # multi-region mutation (Full DOS + section slack + overlay).
             if self.transform_set == "combined":
                 mode = "combined_multi_region"
+            elif self.enable_gamma_sections and self._gamma_section_population:
+                # GAMMA section injection (secml-malware); not overlay padding.
+                r = float(rng.random())
+                if self.enable_section_slack and slack_cap > 0 and capacity > 0:
+                    if r < 0.25:
+                        mode = "gamma_section"
+                    elif r < 0.5:
+                        mode = "fulldos"
+                    elif r < 0.75:
+                        mode = "section_slack"
+                    else:
+                        mode = "padding"
+                elif capacity > 0:
+                    mode = "gamma_section" if r < 0.34 else ("fulldos" if r < 0.67 else "padding")
+                else:
+                    mode = "gamma_section" if r < 0.5 else "padding"
+            elif self.enable_iat_edits:
+                r = float(rng.random())
+                if capacity > 0:
+                    if r < 0.33:
+                        mode = "iat_edit"
+                    elif r < 0.66:
+                        mode = "fulldos"
+                    else:
+                        mode = "padding"
+                else:
+                    mode = "iat_edit" if r < 0.5 else "padding"
             # C7 — three-way transform choice when section slack is enabled;
             # otherwise fall back to the original 50/50 Full-DOS/padding coin.
             elif self.enable_section_slack and slack_cap > 0:
@@ -441,7 +498,64 @@ class ProblemSpacePESearch:
             else:
                 mode = "fulldos" if (capacity > 0 and rng.random() < 0.5) else "padding"
 
-            if mode == "fulldos":
+            if mode == "iat_edit":
+                kind = "iat_edit"
+                self.n_iat_attempts += 1
+                try:
+                    from ..malware.iat_transforms import apply_iat_edit
+
+                    cand, iat_meta = apply_iat_edit(
+                        pe_bytes,
+                        seed=int(rng.integers(0, 2**31 - 1)),
+                    )
+                except ValueError as exc:
+                    reason = str(exc)
+                    if reason == "iat_no_feature_delta":
+                        self.n_iat_no_feature_delta += 1
+                    else:
+                        self.n_iat_failures += 1
+                    history.append(
+                        {
+                            "kind": kind,
+                            "valid": False,
+                            "scored": False,
+                            "reason": reason,
+                        }
+                    )
+                    queries += 1
+                    continue
+                except Exception:
+                    self.n_iat_failures += 1
+                    history.append(
+                        {
+                            "kind": kind,
+                            "valid": False,
+                            "scored": False,
+                            "reason": "iat_edit_failed",
+                        }
+                    )
+                    queries += 1
+                    continue
+            elif mode == "gamma_section":
+                kind = "gamma_section"
+                self.n_gamma_attempts += 1
+                try:
+                    from ..malware.gamma_section import inject_gamma_sections
+
+                    frac = float(0.25 + 0.75 * rng.random())
+                    cand = inject_gamma_sections(
+                        pe_bytes,
+                        self._gamma_section_population or [],
+                        seed=int(rng.integers(0, 2**31 - 1)),
+                        inject_fraction=frac,
+                    )
+                except Exception:
+                    self.n_gamma_failures += 1
+                    history.append({"kind": kind, "valid": False, "scored": False,
+                                    "reason": "gamma_inject_failed"})
+                    queries += 1
+                    continue
+            elif mode == "fulldos":
                 kind = "fulldos"
                 try:
                     cand = apply_fulldos(pe_bytes, self._supplement_or_random_payload(rng, capacity))
@@ -559,7 +673,8 @@ class ProblemSpacePESearch:
                     "clean_p_malware": p0,
                     "best_p_malware": p_mal,
                     "functionality": gate,
-                    "gamma": bool(self.benign_payloads and kind == "gamma_padding"),
+                    "gamma_section": kind == "gamma_section",
+                    "gamma_padding": bool(self.benign_payloads and kind == "gamma_padding"),
                     "secml_gamma_available": try_import_secml_gamma() is not None,
                 }
             if queries >= self.n_queries:
@@ -575,8 +690,18 @@ class ProblemSpacePESearch:
             "queries_used": queries,
             "clean_p_malware": p0,
             "best_p_malware": best_p,
-            "gamma": bool(self.benign_payloads),
+            "gamma": bool(self.benign_payloads)
+            or bool(self.enable_gamma_sections),
+            "gamma_section_enabled": bool(self.enable_gamma_sections),
+            "gamma_padding": bool(self.benign_payloads),
             "secml_gamma_available": try_import_secml_gamma() is not None,
+            "n_gamma_attempts": int(self.n_gamma_attempts),
+            "n_gamma_failures": int(self.n_gamma_failures),
+            "gamma_donor_dir": str(self.gamma_donor_dir) if self.gamma_donor_dir else None,
+            "iat_edits_enabled": bool(self.enable_iat_edits),
+            "n_iat_attempts": int(self.n_iat_attempts),
+            "n_iat_failures": int(self.n_iat_failures),
+            "n_iat_no_feature_delta": int(self.n_iat_no_feature_delta),
             "attempts": len(history),
             "best_bytes": best_bytes,   # D9 — persistable
             "capa_preserve": bool(self.capa_preserve),

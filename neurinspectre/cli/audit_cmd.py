@@ -378,6 +378,12 @@ def build_audit_config(
     query_budgets: Optional[Any] = None,
     pe_sample: Optional[str] = None,
     benign_corpus: Optional[str] = None,
+    enable_gamma_sections: bool = False,
+    gamma_donor_dir: Optional[str] = None,
+    gamma_sections_per_population: int = 5,
+    enable_iat_edits: bool = False,
+    vt_sidecar: Optional[str] = None,
+    sow_adapters_enabled: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     key = _normalize_target(target)
     if key not in AUDIT_TARGETS:
@@ -407,6 +413,12 @@ def build_audit_config(
             budgets=budgets,
             pe_sample=pe_sample,
             benign_corpus=benign_corpus,
+            enable_gamma_sections=enable_gamma_sections,
+            gamma_donor_dir=gamma_donor_dir,
+            gamma_sections_per_population=gamma_sections_per_population,
+            enable_iat_edits=enable_iat_edits,
+            vt_sidecar=vt_sidecar,
+            sow_adapters_enabled=sow_adapters_enabled,
         )
     return {
         "seed": int(seed),
@@ -470,8 +482,19 @@ def _build_ember_audit_config(
     budgets: List[int],
     pe_sample: Optional[str],
     benign_corpus: Optional[str] = None,
+    enable_gamma_sections: bool = False,
+    gamma_donor_dir: Optional[str] = None,
+    gamma_sections_per_population: int = 5,
+    enable_iat_edits: bool = False,
+    vt_sidecar: Optional[str] = None,
+    sow_adapters_enabled: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     is_2024 = target_key in EMBER2024_TARGETS
+    scope_kw = {
+        "gamma_sections_enabled": enable_gamma_sections,
+        "iat_edits_enabled": enable_iat_edits,
+        "sow_adapters_enabled": list(sow_adapters_enabled or []),
+    }
     loader = "ember2024_gbdt" if is_2024 else "ember_gbdt"
     default_model = _ember2024_default_model_path(target_key) if is_2024 else DEFAULT_EMBER_GBDT_PATH
     n_queries = max(budgets) if budgets else (50 if smoke else 5000)
@@ -552,16 +575,30 @@ def _build_ember_audit_config(
             "threat_model": "malware_evasion",
             "same_sample": bool(pe_sample),
             "ember_feature_version": 3 if is_2024 else 2,
-            "pipeline": characterize_audit_pipeline(target_key),
-            "measurement_scope": _measurement_scope_for_target(target_key),
+            "pipeline": characterize_audit_pipeline(target_key, **scope_kw),
+            "measurement_scope": _measurement_scope_for_target(target_key, **scope_kw),
+            "gamma_sections_enabled": bool(enable_gamma_sections),
+            "gamma_donor_dir": gamma_donor_dir,
+            "gamma_sections_per_population": int(gamma_sections_per_population),
+            "iat_edits_enabled": bool(enable_iat_edits),
+            "vt_sidecar": vt_sidecar,
+            "sow_adapters_enabled": list(sow_adapters_enabled or []),
         },
     }
 
 
-def _measurement_scope_for_target(target_key: str) -> Dict[str, Any]:
+def _audit_scope_kwargs(audit_meta: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "gamma_sections_enabled": bool(audit_meta.get("gamma_sections_enabled")),
+        "iat_edits_enabled": bool(audit_meta.get("iat_edits_enabled")),
+        "sow_adapters_enabled": list(audit_meta.get("sow_adapters_enabled") or []),
+    }
+
+
+def _measurement_scope_for_target(target_key: str, **scope_kw: Any) -> Dict[str, Any]:
     from ..malware.measurement_scope import build_measurement_scope
 
-    return build_measurement_scope(target_key)
+    return build_measurement_scope(target_key, **scope_kw)
 
 
 def _first_result(summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -649,7 +686,7 @@ def build_audit_report(summary: Dict[str, Any], *, config: Dict[str, Any]) -> Di
     if _is_ember_target(target_str):
         from ..malware.measurement_scope import build_measurement_scope
 
-        measurement_scope = build_measurement_scope(target_str)
+        measurement_scope = build_measurement_scope(target_str, **_audit_scope_kwargs(audit_meta))
     return {
         "kind": "neurinspectre_audit",
         "target": audit_meta.get("target"),
@@ -704,7 +741,14 @@ def _official_reproduction_from_report(same, same_detail) -> Optional[bool]:
     return None
 
 
-def characterize_audit_pipeline(target: str, *, device: str = "cpu") -> Dict[str, Any]:
+def characterize_audit_pipeline(
+    target: str,
+    *,
+    device: str = "cpu",
+    gamma_sections_enabled: bool = False,
+    iat_edits_enabled: bool = False,
+    sow_adapters_enabled: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """Describe the audit target as a SecurityPipeline without reloading Carmon."""
     import torch.nn as nn
 
@@ -714,13 +758,25 @@ def characterize_audit_pipeline(target: str, *, device: str = "cpu") -> Dict[str
     dummy = nn.Identity()
     if key == "ember-gbdt":
         base = SecurityPipeline.from_ember_gbdt(dummy, device=device).characterize()
-        return enrich_gbdt_pipeline_characterization(base, key)
+        return enrich_gbdt_pipeline_characterization(
+            base,
+            key,
+            gamma_sections_enabled=gamma_sections_enabled,
+            iat_edits_enabled=iat_edits_enabled,
+            sow_adapters_enabled=sow_adapters_enabled,
+        )
     if key in EMBER2024_TARGETS:
         variant = key.replace("ember2024-", "").replace("-gbdt", "")
         base = SecurityPipeline.from_ember2024_gbdt(
             dummy, device=device, variant=variant
         ).characterize()
-        return enrich_gbdt_pipeline_characterization(base, key)
+        return enrich_gbdt_pipeline_characterization(
+            base,
+            key,
+            gamma_sections_enabled=gamma_sections_enabled,
+            iat_edits_enabled=iat_edits_enabled,
+            sow_adapters_enabled=sow_adapters_enabled,
+        )
     if key == "jpeg-carmon":
         from ..defenses.wrappers import JPEGCompressionDefense
 
@@ -732,6 +788,28 @@ def characterize_audit_pipeline(target: str, *, device: str = "cpu") -> Dict[str
 
 
 def run_audit(ctx: click.Context, **kwargs: Any) -> None:
+    from ..malware.sow_adapters import parse_adapter_list, run_sow_adapters
+
+    if bool(kwargs.get("enable_gamma_sections")):
+        from ..malware.gamma_env import gamma_readiness
+
+        gr = gamma_readiness(
+            donor_dir=kwargs.get("gamma_donor_dir"),
+            run_smoke_inject=False,
+        )
+        if not gr.get("ready"):
+            secml = gr.get("secml_malware") or {}
+            raise click.ClickException(
+                "GAMMA section injection requires neurinspectre[gamma] "
+                f"(secml_malware: {secml.get('reason') or secml}). "
+                f"Install: pip install -e '.[gamma]'"
+            )
+        donor = (gr.get("donor") or {}).get("resolved")
+        if not donor:
+            raise click.ClickException(
+                "GAMMA requires --gamma-donor-dir with benign PE donors "
+                "or secml-malware bundled goodware_samples."
+            )
     if bool(kwargs.get("crossing_matrix")) or bool(kwargs.get("capa_diff_best")):
         if not bool(kwargs.get("save_best_bytes")):
             raise click.ClickException(
@@ -759,9 +837,16 @@ def run_audit(ctx: click.Context, **kwargs: Any) -> None:
         query_budgets=kwargs.get("query_budgets"),
         pe_sample=kwargs.get("pe_sample"),
         benign_corpus=kwargs.get("benign_corpus"),
+        enable_gamma_sections=bool(kwargs.get("enable_gamma_sections")),
+        gamma_donor_dir=kwargs.get("gamma_donor_dir"),
+        gamma_sections_per_population=int(kwargs.get("gamma_sections_per_population") or 5),
+        enable_iat_edits=bool(kwargs.get("enable_iat_edits")),
+        vt_sidecar=kwargs.get("vt_sidecar"),
+        sow_adapters_enabled=parse_adapter_list(kwargs.get("sow_adapter")),
     )
+    scope_kw = _audit_scope_kwargs(config.get("audit") or {})
     if "pipeline" not in (config.get("audit") or {}):
-        config["audit"]["pipeline"] = characterize_audit_pipeline(target)
+        config["audit"]["pipeline"] = characterize_audit_pipeline(target, **scope_kw)
     pe_source = kwargs.get("pe_sample")
     if not pe_source:
         config["audit"]["problem_space"] = evaluate_pe_parse(None)
@@ -930,6 +1015,13 @@ def run_audit(ctx: click.Context, **kwargs: Any) -> None:
                 fulldos_quiet_only=bool(kwargs.get("fulldos_quiet_only")),
                 best_bytes_dir=(Path(output_dir) / "best_bytes")
                     if bool(kwargs.get("save_best_bytes")) else None,
+                enable_gamma_sections=bool(kwargs.get("enable_gamma_sections")),
+                gamma_donor_dir=kwargs.get("gamma_donor_dir"),
+                gamma_sections_per_population=int(
+                    kwargs.get("gamma_sections_per_population") or 5
+                ),
+                enable_iat_edits=bool(kwargs.get("enable_iat_edits")),
+                vt_sidecar_path=kwargs.get("vt_sidecar"),
             )
         if v3_status is not None:
             # evaluate_ember_same_sample stubs `extractor` when a custom callable is
@@ -983,12 +1075,12 @@ def run_audit(ctx: click.Context, **kwargs: Any) -> None:
     click.echo(f"[audit] report written to {report_path}")
 
     if _is_ember_target(report.get("target") or "") and report.get("measurement_scope"):
-        from ..malware.measurement_scope import not_measured_ids
-
-        gap_ids = ",".join(not_measured_ids())
+        ms = report.get("measurement_scope") or {}
+        gap_ids = ",".join(ms.get("not_measured_ids") or [])
+        gamma_on = bool(ms.get("gamma_sections_enabled"))
         click.echo(
             "[audit] measurement_scope: named LightGBM + parse gate + query budget "
-            f"(engagement gaps not measured: {gap_ids})"
+            f"(gamma_sections={gamma_on}; engagement gaps not measured: {gap_ids})"
         )
 
     if bool(kwargs.get("crossing_matrix")):
@@ -1035,6 +1127,22 @@ def run_audit(ctx: click.Context, **kwargs: Any) -> None:
         diag_path = output_dir / "ember_audit_diagnosis.json"
         save_json(diag, diag_path)
         click.echo(f"[audit] ember_audit_diagnosis -> {diag_path} n={diag.get('n')}")
+
+    adapters = parse_adapter_list(kwargs.get("sow_adapter"))
+    if adapters:
+        try:
+            sow_out = run_sow_adapters(
+                output_dir,
+                adapters,
+                ack=bool(kwargs.get("sow_adapter_ack")),
+                av_system_name=kwargs.get("av_system_name"),
+            )
+            click.echo(
+                f"[audit] sow_adapters -> {output_dir / 'sow_adapter_results.json'} "
+                f"n={len(sow_out.get('adapters') or [])}"
+            )
+        except (PermissionError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
 
     # A3 — always attempt the Capa-tagged claim ledger. Cheap; no-op when
     # there is no same_sample_detail or when the samples carry no tags.

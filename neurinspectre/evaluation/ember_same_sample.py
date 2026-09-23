@@ -44,6 +44,11 @@ def evaluate_ember_same_sample(
     capa_supplement_index: Optional[Dict[str, list]] = None,
     supplement_root: Optional[Any] = None,
     best_bytes_dir: Optional[Any] = None,
+    enable_gamma_sections: bool = False,
+    gamma_donor_dir=None,
+    gamma_sections_per_population: int = 5,
+    enable_iat_edits: bool = False,
+    vt_sidecar_path=None,
 ) -> Dict[str, Any]:
     rng = np.random.default_rng(int(seed))
     budgets = list(query_budgets or [10, 25, 50])
@@ -57,6 +62,16 @@ def evaluate_ember_same_sample(
     tag_lookup: Dict[str, Dict[str, Any]] = {
         str(k).lower(): dict(v) for k, v in (tags_by_sha256 or {}).items()
     }
+    vt_lookup: Dict[str, Dict[str, Any]] = {}
+    if vt_sidecar_path:
+        from pathlib import Path as _VtPath
+        from ..malware.vt_sidecar import load_vt_sidecar
+
+        raw_vt = load_vt_sidecar(_VtPath(vt_sidecar_path))
+        if "records" in raw_vt and isinstance(raw_vt["records"], dict):
+            vt_lookup = {str(k).lower(): dict(v) for k, v in raw_vt["records"].items()}
+        else:
+            vt_lookup = {str(k).lower(): dict(v) for k, v in raw_vt.items()}
     tags_active = bool(tag_lookup)
     n_filtered_out = 0
     n_untagged_seen = 0
@@ -89,29 +104,34 @@ def evaluate_ember_same_sample(
         # carry the original file's ATT&CK/MBC/capa provenance into the
         # ledger. Full tag record is preserved; the truncated `tags` field
         # keeps back-compat with A1 report consumers.
-        if tags_active or filter_active:
+        if tags_active or filter_active or vt_lookup:
             import hashlib as _hashlib
 
             sha = _hashlib.sha256(data).hexdigest()
             row["sha256"] = sha
-            tags = tag_lookup.get(sha)
-            if tags is None:
-                if filter_active:
-                    n_untagged_seen += 1
-                    if not filter_include_untagged:
+            if vt_lookup:
+                from ..malware.vt_sidecar import compact_vt_for_sample
+
+                row["vt_metadata"] = compact_vt_for_sample(vt_lookup.get(sha.lower()))
+            if tags_active or filter_active:
+                tags = tag_lookup.get(sha)
+                if tags is None:
+                    if filter_active:
+                        n_untagged_seen += 1
+                        if not filter_include_untagged:
+                            n_filtered_out += 1
+                            row.update({"kept": False, "reason": "filter_untagged"})
+                            indexed.append(row)
+                            continue
+                else:
+                    from ..malware.capa_filters import compact_operator_tags
+                    row["tags"] = compact_operator_tags(tags)
+                    row["tags_full"] = dict(tags)
+                    if filter_active and not tag_filter.match(tags):
                         n_filtered_out += 1
-                        row.update({"kept": False, "reason": "filter_untagged"})
+                        row.update({"kept": False, "reason": "filter_tag_mismatch"})
                         indexed.append(row)
                         continue
-            else:
-                from ..malware.capa_filters import compact_operator_tags
-                row["tags"] = compact_operator_tags(tags)
-                row["tags_full"] = dict(tags)
-                if filter_active and not tag_filter.match(tags):
-                    n_filtered_out += 1
-                    row.update({"kept": False, "reason": "filter_tag_mismatch"})
-                    indexed.append(row)
-                    continue
         parse = evaluate_pe_parse(data)
         if parse.get("available") and parse.get("passed") is False:
             row.update(
@@ -168,6 +188,7 @@ def evaluate_ember_same_sample(
         "valid_success_rate": None,
         "query_curve": [],
         "secml_gamma_available": False,
+        "gamma_sections_enabled": bool(enable_gamma_sections),
     }
     # D9 — always define so the return can reference it whether or not the
     # problem-space branch runs.
@@ -207,6 +228,8 @@ def evaluate_ember_same_sample(
         # attack time (that would defeat the point of the index); instead
         # supplement_payloads is passed in whole from the caller if desired.
         supplement_payloads_by_sha = capa_supplement_index or {}
+        from pathlib import Path as _Path
+
         search = ProblemSpacePESearch(
             model,
             n_queries=int(n_queries),
@@ -221,6 +244,10 @@ def evaluate_ember_same_sample(
             transform_set=str(transform_set or "default"),
             fulldos_quiet_only=bool(fulldos_quiet_only),
             supplement_payloads=None,
+            enable_gamma_sections=bool(enable_gamma_sections),
+            gamma_donor_dir=_Path(gamma_donor_dir) if gamma_donor_dir else None,
+            gamma_sections_per_population=int(gamma_sections_per_population),
+            enable_iat_edits=bool(enable_iat_edits),
         )
         ps_success = []
         ps_valid_success = []
@@ -281,6 +308,8 @@ def evaluate_ember_same_sample(
             ps_queries.append(int(result.get("queries_used") or n_queries))
             ps_rows.append(result)
         n = len(kept)
+        from ..attacks.problem_space_pe import try_import_secml_gamma
+
         problem_block.update(
             {
                 "attack_success_rate": float(sum(ps_success) / n),
@@ -291,8 +320,15 @@ def evaluate_ember_same_sample(
                 "valid_success": ps_valid_success,
                 "transforms": [r.get("chosen_attack") for r in ps_rows],
                 "gamma_padding": bool(benign_payloads),
+                "gamma_sections_enabled": bool(enable_gamma_sections),
+                "secml_gamma_available": try_import_secml_gamma() is not None,
             }
         )
+    else:
+        from ..attacks.problem_space_pe import try_import_secml_gamma
+
+        problem_block["secml_gamma_available"] = try_import_secml_gamma() is not None
+        problem_block["gamma_sections_enabled"] = bool(enable_gamma_sections)
 
     unpaired = [r for r in indexed if not r.get("kept")]
     return {
