@@ -282,6 +282,22 @@ def _audit_readiness() -> Dict[str, Any]:
             "EMBER2018 has no PE binaries. Same-sample Full DOS / padding "
             "requires --pe-sample. Feature-space ASR is not PE-valid."
         ),
+        "measurement_frame_cli": {
+            "scope_pe_corpus": (
+                "neurinspectre scope-pe-corpus <pe_dir> "
+                "--supplement-index data/ember/ember2024/capa_supplement_index.json"
+            ),
+            "audit_with_crossing": (
+                "neurinspectre audit --target ember2024-gbdt --pe-sample <dir> "
+                "--save-best-bytes --crossing-matrix --write-diagnosis"
+            ),
+            "transferability": (
+                "neurinspectre transferability <audit_dir>/audit_report.json --default-crossing"
+            ),
+            "capa_diff": "neurinspectre capa-diff-audit <audit_dir>/audit_report.json",
+            "diagnose": "neurinspectre diagnose-ember-audit <audit_dir>",
+            "pipeline_info": "neurinspectre ember-pipeline-info --target ember2024-gbdt",
+        },
     }
 
 
@@ -440,6 +456,19 @@ def run_doctor(ctx: click.Context, **kwargs: Any) -> None:
                 f"EMBER2024 extractor: {ext2024.get('reasons')} — {ext2024.get('hint') or ''}"
             )
         click.echo(f"Audit CLI: {audit.get('cli')}")
+        frame = audit.get("measurement_frame_cli") or {}
+        if frame:
+            click.echo("Measurement frame (PE red-team):")
+            for key in (
+                "scope_pe_corpus",
+                "audit_with_crossing",
+                "transferability",
+                "capa_diff",
+                "diagnose",
+                "pipeline_info",
+            ):
+                if frame.get(key):
+                    click.echo(f"  {key}: {frame[key]}")
 
     if isinstance(pkg_hash, dict) and pkg_hash.get("available"):
         click.echo(f"Installed package sha256 (py): {pkg_hash.get('sha256')}")

@@ -54,6 +54,8 @@ _CLICK_COMMANDS = {
     "tag-pe-corpus",
     "diagnose-ember-audit",
     "scope-pe-corpus",
+    "capa-diff-audit",
+    "ember-pipeline-info",
 }
 
 
@@ -1462,7 +1464,7 @@ def table2_smoke_cmd(ctx: click.Context, **kwargs) -> None:
     "--query-budgets",
     type=str,
     default=None,
-    help="Comma-separated Square query budgets (default 100,500,2000,5000; smoke 10,25,50)",
+    help="Comma-separated Square query budgets (default 10,50,100,500,5000; smoke 10,25,50)",
 )
 @click.option(
     "--pe-sample",
@@ -1552,6 +1554,8 @@ def table2_smoke_cmd(ctx: click.Context, **kwargs) -> None:
 @click.option("--capa-diff-backend", type=click.Choice(["file_level", "full"]),
               default="full", show_default=True,
               help="Capa backend for --capa-diff-best.")
+@click.option("--write-diagnosis/--no-write-diagnosis", default=False,
+              help="EMBER: write ember_audit_diagnosis.json beside audit_report.json.")
 @click.option(
     "--device",
     type=click.Choice(["cuda", "cpu", "mps", "auto"]),
@@ -2345,28 +2349,83 @@ def tag_pe_corpus_cmd(pe_dir, dataset_dir, output, keep_fields):
               help="Diagnosis JSON path (default: sibling ember_audit_diagnosis.json)")
 def diagnose_ember_audit_cmd(report, output):
     """Summarize an EMBER same-sample audit report into a compact diagnosis JSON."""
+    import json as _json
     from pathlib import Path
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "diagnose_ember_audit",
-        Path(__file__).resolve().parent.parent.parent / "scripts" / "diagnose_ember_audit.py",
+
+    from neurinspectre.evaluation.ember_audit_diagnosis import (
+        load_ember_audit_report,
+        summarize_ember_audit_report,
     )
-    if spec is None or spec.loader is None:
-        raise click.ClickException("Could not locate scripts/diagnose_ember_audit.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    argv = [str(report)]
-    if output:
-        argv += ["--output", str(output)]
-    import sys
-    old = sys.argv[:]
-    try:
-        sys.argv = ["diagnose_ember_audit.py"] + argv
-        exit_code = module.main()
-    finally:
-        sys.argv = old
-    if exit_code:
-        raise click.ClickException(f"diagnosis returned no records (exit {exit_code})")
+
+    report_path = Path(report)
+    diag = summarize_ember_audit_report(load_ember_audit_report(report_path))
+    out = Path(output) if output else None
+    if out is None:
+        base = report_path if report_path.is_dir() else report_path.parent
+        out = base / "ember_audit_diagnosis.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_json.dumps(diag, indent=2, default=str), encoding="utf-8")
+    click.echo(f"wrote {out}")
+    if diag.get("n") == 0:
+        raise click.ClickException("diagnosis: no GBDT-detected samples in report")
+
+
+@cli.command("capa-diff-audit")
+@click.argument("report", type=click.Path(exists=True))
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write capa_diff_audit.json (default: sibling of report)")
+@click.option("--capa-rules-dir", type=click.Path(), default=None,
+              help="Override capa-rules directory")
+@click.option("--backend", "capa_diff_backend",
+              type=click.Choice(["file_level", "full"]), default="full", show_default=True)
+@click.option("--max-samples", type=int, default=None,
+              help="Limit rows from best_bytes_manifest")
+def capa_diff_audit_cmd(report, output, capa_rules_dir, capa_diff_backend, max_samples):
+    """Capa diff original vs audit best_bytes PEs (post-hoc; requires --save-best-bytes audit)."""
+    import json as _json
+    from pathlib import Path
+
+    from neurinspectre.evaluation.capa_diff_audit import capa_diff_best_bytes_report
+
+    report_path = Path(report)
+    if report_path.is_dir():
+        report_path = report_path / "audit_report.json"
+    capa_report = capa_diff_best_bytes_report(
+        report_path,
+        rules_dir=Path(capa_rules_dir) if capa_rules_dir else None,
+        backend=str(capa_diff_backend),
+        max_samples=max_samples,
+    )
+    out = Path(output) if output else report_path.parent / "capa_diff_audit.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_json.dumps(capa_report, indent=2, default=str), encoding="utf-8")
+    click.echo(
+        f"wrote {out} n_scanned={capa_report.get('n_scanned')} "
+        f"errors={capa_report.get('n_errors')}"
+    )
+
+
+@cli.command("ember-pipeline-info")
+@click.option(
+    "--target",
+    required=True,
+    help="Audit target (ember-gbdt, ember2024-gbdt, jpeg-carmon, carmon, …)",
+)
+@click.option("--device", type=click.Choice(["cuda", "cpu", "mps", "auto"]), default="cpu",
+              show_default=True)
+@click.option("--json/--no-json", "as_json", default=True, show_default=True,
+              help="Print pipeline characterization JSON")
+def ember_pipeline_info_cmd(target, device, as_json):
+    """Print SecurityPipeline characterization + measurement_scope for an audit target."""
+    import json as _json
+
+    from neurinspectre.cli.audit_cmd import characterize_audit_pipeline
+
+    info = characterize_audit_pipeline(target, device=device)
+    if as_json:
+        click.echo(_json.dumps(info, indent=2, default=str))
+    else:
+        click.echo(str(info))
 
 
 @cli.command("doctor")

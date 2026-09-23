@@ -552,8 +552,16 @@ def _build_ember_audit_config(
             "threat_model": "malware_evasion",
             "same_sample": bool(pe_sample),
             "ember_feature_version": 3 if is_2024 else 2,
+            "pipeline": characterize_audit_pipeline(target_key),
+            "measurement_scope": _measurement_scope_for_target(target_key),
         },
     }
+
+
+def _measurement_scope_for_target(target_key: str) -> Dict[str, Any]:
+    from ..malware.measurement_scope import build_measurement_scope
+
+    return build_measurement_scope(target_key)
 
 
 def _first_result(summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -752,7 +760,8 @@ def run_audit(ctx: click.Context, **kwargs: Any) -> None:
         pe_sample=kwargs.get("pe_sample"),
         benign_corpus=kwargs.get("benign_corpus"),
     )
-    config["audit"]["pipeline"] = characterize_audit_pipeline(target)
+    if "pipeline" not in (config.get("audit") or {}):
+        config["audit"]["pipeline"] = characterize_audit_pipeline(target)
     pe_source = kwargs.get("pe_sample")
     if not pe_source:
         config["audit"]["problem_space"] = evaluate_pe_parse(None)
@@ -1015,6 +1024,14 @@ def run_audit(ctx: click.Context, **kwargs: Any) -> None:
             f"[audit] capa_diff_audit -> {capa_path} "
             f"n_scanned={capa_report.get('n_scanned')} errors={capa_report.get('n_errors')}"
         )
+
+    if bool(kwargs.get("write_diagnosis")) and _is_ember_target(report.get("target") or ""):
+        from ..evaluation.ember_audit_diagnosis import summarize_ember_audit_report
+
+        diag = summarize_ember_audit_report(report)
+        diag_path = output_dir / "ember_audit_diagnosis.json"
+        save_json(diag, diag_path)
+        click.echo(f"[audit] ember_audit_diagnosis -> {diag_path} n={diag.get('n')}")
 
     # A3 — always attempt the Capa-tagged claim ledger. Cheap; no-op when
     # there is no same_sample_detail or when the samples carry no tags.

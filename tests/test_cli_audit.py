@@ -25,6 +25,36 @@ def test_audit_help_exposes_ember_same_sample_flags():
     assert "--mode" in result.output
     assert "--require-official-rep" in result.output
     assert "--require-detected" in result.output
+    assert "--crossing-matrix" in result.output
+    assert "--capa-diff-best" in result.output
+    assert "--write-diagnosis" in result.output
+
+
+def test_measurement_frame_commands_registered():
+    from neurinspectre.cli.main import _CLICK_COMMANDS
+
+    for name in (
+        "scope-pe-corpus",
+        "diagnose-ember-audit",
+        "capa-diff-audit",
+        "ember-pipeline-info",
+    ):
+        assert name in _CLICK_COMMANDS
+
+
+def test_config_audit_embeds_measurement_scope_for_ember():
+    from neurinspectre.cli.audit_cmd import build_audit_config
+
+    cfg = build_audit_config(
+        target="ember2024-gbdt",
+        n_examples=4,
+        smoke=True,
+        pe_sample="/tmp/pe_corpus",
+    )
+    audit = cfg.get("audit") or {}
+    assert audit.get("measurement_scope")
+    assert audit.get("pipeline")
+    assert "not_measured" in (audit.get("measurement_scope") or {})
 
 
 def test_require_official_reproduction_fails_on_mac_or_unverified_lief():
