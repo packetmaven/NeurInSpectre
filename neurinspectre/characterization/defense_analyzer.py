@@ -81,6 +81,9 @@ class DefenseCharacterization:
             "recommended_eot_samples": int(self.recommended_eot_samples),
             "recommended_memory_length": int(self.recommended_memory_length),
             "confidence": float(self.confidence),
+            "chosen_attack": getattr(self, "chosen_attack", None) or (self.metadata or {}).get("chosen_attack"),
+            "selected_attack_impl": getattr(self, "selected_attack_impl", None)
+            or (self.metadata or {}).get("selected_attack_impl"),
             "metadata": self.metadata,
         }
 

@@ -29,24 +29,30 @@ class SquareAttack(Attack):
         p_init: float = 0.8,
         loss_type: str = "margin",
         device: str = "cuda",
+        allow_short_budget: bool = False,
     ):
         super().__init__(model, device)
         self.eps = float(eps)
         self.n_queries = int(n_queries)
         self.p_init = float(p_init)
         self.loss_type = str(loss_type)
+        self.allow_short_budget = bool(allow_short_budget)
 
-        if self.loss_type not in {"margin", "ce"}:
-            raise ValueError("loss_type must be 'margin' or 'ce'.")
+        if self.loss_type not in {"margin", "ce", "label", "labels", "hard"}:
+            raise ValueError("loss_type must be 'margin', 'ce', or 'label'.")
+        if self.loss_type in {"labels", "hard"}:
+            self.loss_type = "label"
 
         # Ensure sufficient queries for convergence.
         #
         # NOTE: Don't use `assert` here: python -O disables asserts, which would
         # silently permit meaningless "ran but didn't search" outcomes.
-        if self.n_queries < 1000:
+        # Practical Grosse-style modes may relax this via allow_short_budget.
+        if self.n_queries < 1000 and not self.allow_short_budget:
             raise ValueError(
                 "Square Attack requires >=1000 queries for reliable results "
-                f"(got n_queries={self.n_queries})."
+                f"(got n_queries={self.n_queries}). "
+                "Pass allow_short_budget=True for Grosse-style budget curves."
             )
 
     def _margin_loss(self, logits: torch.Tensor, y: torch.Tensor, targeted: bool = False) -> torch.Tensor:
@@ -64,6 +70,19 @@ class SquareAttack(Attack):
 
         margin = z_y - z_max_other
         return -margin if not targeted else margin
+
+    def _label_loss(self, logits: torch.Tensor, y: torch.Tensor, targeted: bool = False) -> torch.Tensor:
+        preds = logits.argmax(dim=1)
+        flipped = preds != y
+        return flipped.float() if not targeted else (~flipped).float()
+
+    def _attack_loss(self, logits: torch.Tensor, y: torch.Tensor, targeted: bool = False) -> torch.Tensor:
+        if self.loss_type == "margin":
+            return self._margin_loss(logits, y, targeted)
+        if self.loss_type == "label":
+            return self._label_loss(logits, y, targeted)
+        loss = F.cross_entropy(logits, y, reduction="none")
+        return -loss if targeted else loss
 
     def _square_size_schedule(self, query: int) -> float:
         """Compute square size ratio p(q) = p_0 * (1 - q/Q)."""
@@ -108,17 +127,14 @@ class SquareAttack(Attack):
 
         with torch.no_grad():
             logits_init = self.model(x + delta)
-            if self.loss_type == "margin":
-                loss_best = self._margin_loss(logits_init, y, targeted)
-            else:
-                loss_best = F.cross_entropy(logits_init, y, reduction="none")
-                if targeted:
-                    loss_best = -loss_best
+            loss_best = self._attack_loss(logits_init, y, targeted)
+            preds_init = logits_init.argmax(1)
+            success = preds_init == y if targeted else preds_init != y
 
-        queries_used = torch.zeros(batch_size, device=self.device)
-        success = torch.zeros(batch_size, dtype=torch.bool, device=self.device)
+        # Official Square counts the initial evaluation as query 1.
+        queries_used = torch.ones(batch_size, device=self.device)
 
-        for query in range(self.n_queries):
+        for query in range(max(self.n_queries - 1, 0)):
             p = self._square_size_schedule(query)
             # Optimization: only evaluate the remaining not-yet-successful subset.
             # This preserves the algorithm's semantics while dramatically reducing
@@ -167,12 +183,7 @@ class SquareAttack(Attack):
 
             with torch.no_grad():
                 logits_new_active = self.model(x_active + delta_new_active)
-                if self.loss_type == "margin":
-                    loss_new_active = self._margin_loss(logits_new_active, y_active, targeted)
-                else:
-                    loss_new_active = F.cross_entropy(logits_new_active, y_active, reduction="none")
-                    if targeted:
-                        loss_new_active = -loss_new_active
+                loss_new_active = self._attack_loss(logits_new_active, y_active, targeted)
 
                 improved_active = loss_new_active > loss_best_active
                 if improved_active.any():
@@ -206,6 +217,8 @@ class SquareAttack(Attack):
             "success": success.cpu().numpy(),
             "final_margin": final_margin.cpu().numpy(),
             "asr": success.float().mean().item(),
+            "loss_type": self.loss_type,
+            "query_floor_relaxed": bool(self.allow_short_budget and self.n_queries < 1000),
         }
 
         if verbose:
@@ -251,11 +264,11 @@ class SquareAttackL2(Attack):
         with torch.no_grad():
             logits_init = self.model(x + delta)
             loss_best = -(logits_init[torch.arange(batch_size), y] - logits_init.scatter(1, y.unsqueeze(1), -1e10).max(1)[0])
+            success = logits_init.argmax(1) != y
 
-        queries_used = torch.zeros(batch_size, device=self.device)
-        success = torch.zeros(batch_size, dtype=torch.bool, device=self.device)
+        queries_used = torch.ones(batch_size, device=self.device)
 
-        for query in range(self.n_queries):
+        for query in range(max(self.n_queries - 1, 0)):
             p = self.p_init * (1.0 - query / self.n_queries)
             delta_new = delta.clone()
 

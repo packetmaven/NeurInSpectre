@@ -10,6 +10,7 @@ from .cifar10 import (
 )
 from .factory import ModelFactory, TrainingType, ModelSpec, NormalizedModel
 from .custom import build_ember_mlp, build_nuscenes_resnet18
+from .ember_gbdt import EmberGBDT, load_ember_gbdt
 
 __all__ = [
     "load_model",
@@ -24,4 +25,6 @@ __all__ = [
     "NormalizedModel",
     "build_ember_mlp",
     "build_nuscenes_resnet18",
+    "EmberGBDT",
+    "load_ember_gbdt",
 ]

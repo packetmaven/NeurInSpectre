@@ -99,6 +99,11 @@ docs = [
     "sphinx-rtd-theme>=1.0.0",
     "sphinxcontrib-napoleon>=0.7",
 ]
+malware = [
+    "lightgbm",
+    "pefile",
+    "lief>=0.13,<0.14",
+]
 viz = [
     "jupyter>=1.0.0",
     "ipywidgets>=7.7.0",

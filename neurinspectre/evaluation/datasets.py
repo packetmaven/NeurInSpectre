@@ -15,7 +15,7 @@ import os
 import tarfile
 import urllib.request
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -284,6 +284,7 @@ class EMBERDataset:
         num_workers: int = 2,
         split: str = "test",
         pin_memory: bool = True,
+        filter_label: Optional[int] = None,
     ) -> Tuple[DataLoader, torch.Tensor, torch.Tensor]:
         subset = "train" if str(split).lower() in {"train", "training"} else "test"
         data_dir = os.path.join(root, "ember_2018")
@@ -295,6 +296,8 @@ class EMBERDataset:
         # Filter out unlabeled samples (-1). We only materialize the chosen subset.
         y_arr = np.asarray(y_mm, dtype=np.float32)
         labeled_idx = np.nonzero(y_arr >= 0)[0]
+        if filter_label is not None:
+            labeled_idx = labeled_idx[y_arr[labeled_idx] == int(filter_label)]
         if labeled_idx.size == 0:
             raise ValueError("EMBER vectorized labels contain no labeled samples (y >= 0).")
 

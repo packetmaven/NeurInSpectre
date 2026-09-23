@@ -116,6 +116,16 @@ attacks:
     notes: >
       Orchestrates BPDA/EOT/memory-augmented gradients according to
       neurinspectre.characterization.defense_analyzer output.
+  # Month 1 columns (disabled so Table 8 reproduction stays 12x3).
+  # Enable and run `neurinspectre audit --target carmon` / jpeg-carmon instead.
+  aa_official:
+    enabled: false
+    type: aa_official
+    config_key: apgd
+  aa_bpda:
+    enabled: false
+    type: aa_bpda
+    config_key: apgd
 
 # Defense registry for Table 2
 #

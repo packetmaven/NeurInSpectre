@@ -27,6 +27,7 @@ _CLICK_COMMANDS = {
     "mitre-atlas",
     "table2",
     "table2-smoke",
+    "audit",
     "compare",
     "config",
 }
@@ -68,7 +69,10 @@ class _NeurInSpectreArgumentParser(argparse.ArgumentParser):
 def main():
     """Main CLI entry point"""
     argv = sys.argv[1:]
-    if argv and argv[0] in _CLICK_COMMANDS:
+    # No args / help / version, and all Click commands (including audit),
+    # go through neurinspectre.cli.main so `neurinspectre audit` is always
+    # reachable from python -m neurinspectre.cli as well as the console script.
+    if (not argv) or argv[0] in _CLICK_COMMANDS or argv[0] in {"-h", "--help", "--version"}:
         from .main import main as click_main
 
         return click_main()
