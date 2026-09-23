@@ -74,7 +74,7 @@ def _iter_text_files(root: Path, *, exts: Sequence[str]) -> Iterable[Path]:
             continue
         # Skip venvs/caches if present inside root
         parts = set(p.parts)
-        if {'__pycache__', '.git', '.cursor', 'node_modules'} & parts:
+        if {'__pycache__', '.git', 'node_modules', '.vscode', '.idea'} & parts:
             continue
         if any(part.startswith('venv') for part in p.parts):
             continue
