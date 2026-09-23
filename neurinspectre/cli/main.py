@@ -6,11 +6,6 @@ Usage:
     neurinspectre characterize --model resnet50.pth --defense jpeg
     neurinspectre evaluate --config eval.yaml
 
-Cross-ref: Paper Section 4 "Implementation"
-Cross-ref: WOOT 2026 submission
-
-Author: [Redacted]
-Date: 2026-02-05
 Version: 2.0
 """
 

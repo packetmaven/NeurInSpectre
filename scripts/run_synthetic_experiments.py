@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Reproduce CCS '26 paper Tables 1-4: synthetic obfuscation signatures.
+Synthetic obfuscation signatures for Tables 1-4.
 
 This script generates deterministic synthetic gradient sequences with
 documented parameters, runs all three detection layers on them, and
@@ -459,7 +459,7 @@ def main():
             "T": T,
             "canonical_seed": CANONICAL_SEED,
             "calibration_n_seeds": CALIBRATION_N_SEEDS,
-            "description": "CCS '26 Tables 1-4 (synthetic reproduction)",
+            "description": "Tables 1-4 (synthetic signatures)",
             "alpha_estimator": "autocorrelation decay slope (see alpha_from_acf in script)",
         },
         "table1_calibration": table1,

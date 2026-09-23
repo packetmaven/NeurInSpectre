@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Failure-analysis harness for CCS '26 artifact evaluation.
+# Failure-analysis harness.
 #
 # Goal: generate concrete "this can fail / become meaningless" artifacts:
 # - short gradient histories (N < 64) downweight confidence

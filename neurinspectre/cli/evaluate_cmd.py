@@ -373,7 +373,7 @@ def run_evaluation(ctx: click.Context, **kwargs: Any) -> None:
     summary_only = bool(kwargs.get("summary_only", False))
 
     # -------------------------------------------------------------------
-    # Issue 8 (+ WOOT revision): multi-seed replication (mean ± std + 95% CI)
+    # Issue 8: multi-seed replication (mean ± std + 95% CI)
     # -------------------------------------------------------------------
     seed_override = kwargs.get("_seed_override", None)
     if seed_override is not None:

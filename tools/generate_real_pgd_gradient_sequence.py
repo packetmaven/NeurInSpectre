@@ -116,7 +116,7 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(out_path, arr)
 
-    # Also write a tiny sidecar JSON for provenance (helpful for a paper artifact).
+    # Also write a tiny sidecar JSON for provenance.
     meta = {
         "model": str(args.model),
         "prompt": str(args.prompt),

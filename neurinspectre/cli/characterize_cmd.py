@@ -20,7 +20,7 @@ Cross-ref: Paper Equations 8-12 (characterization metrics)
 Cross-ref: Paper Section 4 "Implementation"
 Cross-ref: Paper Table 2 "Ablation study"
 
-Version: 2.0.1 (WOOT 2026 submission aligned)
+Version: 2.0.1
 """
 
 from __future__ import annotations

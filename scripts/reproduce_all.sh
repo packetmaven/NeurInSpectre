@@ -2,21 +2,14 @@
 set -euo pipefail
 
 # =============================================================================
-# Offensive-framework paper reproduction (CCS '26 submission #2).
-#
-# Scope: this script reproduces the OFFENSIVE paper only (7-module toolkit +
-# 12-defense evasion). It is NOT the detection-framework paper's reproduction.
-# For the detection-framework paper (CCS '26 submission #1, "Three-Layer
-# Mathematical Framework..."), use scripts/reproduce_detection.sh or follow
-# QUICKSTART_CCS.md.
-#
-# Default output directory: results/offensive_<timestamp>/ — kept separate
-# from the detection paper's default output directory (results/detection/).
+# Table 8 and toolkit harness (7-module toolkit + 12-defense evasion).
+# Detection experiments live in scripts/reproduce_detection.sh.
+# Default output directory: results/offensive_<timestamp>/.
 # =============================================================================
 
 echo "=== NeurInSpectre Reproduction Script ==="
-echo "=== CCS '26 Artifact Harness (offensive framework paper) ==="
-echo "=== For the detection-framework paper, use: scripts/reproduce_detection.sh ==="
+echo "=== Table 8 and toolkit harness ==="
+echo "=== Detection experiments: scripts/reproduce_detection.sh ==="
 echo ""
 
 RESULTS_DIR="${RESULTS_DIR:-results/offensive_$(date +%Y%m%d_%H%M%S)}"
@@ -522,7 +515,7 @@ cat > "$RESULTS_DIR/table_command_map.md" <<EOF
 # Single Command Per Table (Artifact Harness)
 
 This file records the canonical single command (or harness target) used to
-reproduce each paper table claim from this repository.
+reproduce each table from this repository.
 
 ## Table 8 (Core defenses x attacks)
 
@@ -539,7 +532,7 @@ reproduce each paper table claim from this repository.
 
 - Set \`TABLE2_REUSE_DIR=<existing_table8_dir>\` to package an already-complete Table 8 run without rerunning compute.
 - Set \`SKIP_CORE_EVASION=1\` and/or \`SKIP_SMOKE=1\` to scope execution.
-- Set \`TABLE2_NUM_SEEDS=5\` (or pass \`--seeds\`) for paper-grade multi-seed replication; outputs \`seed_<seed>/\` subdirs and adds \`*_std\` and \`*_ci95\` fields to \`summary.json\`.
+- Set \`TABLE2_NUM_SEEDS=5\` (or pass \`--seeds\`) for multi-seed replication; outputs \`seed_<seed>/\` subdirs and adds \`*_std\` and \`*_ci95\` fields to \`summary.json\`.
 EOF
 
 echo ""

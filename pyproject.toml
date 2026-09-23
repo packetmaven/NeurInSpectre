@@ -5,7 +5,6 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neurinspectre"
 version = "2.0.0"
-# Anonymized for CCS '26 double-blind review. De-anonymize after acceptance.
 authors = [
     {name = "Anonymous", email = "anonymous@example.com"},
 ]
