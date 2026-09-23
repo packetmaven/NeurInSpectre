@@ -127,7 +127,8 @@ venv/bin/neurinspectre audit --target ember2024-gbdt \
   --capa-diff-best --capa-diff-backend file_level \
   -o results/audit/ember2024_capa_diff_smoke
 
-# One-shot operator bundle: scope + audit + diagnosis + crossing + zip
+# One-shot operator bundle: scope + vt_sidecar + audit + diagnosis + crossing + zip
+# (save-best-bytes and crossing on by default; pass --sow-adapter* to run adapters after audit)
 venv/bin/neurinspectre redteam-bundle /client/malware_pe \
   -o results/audit/ember2024_client_bundle \
   --target ember2024-gbdt --require-detected \
@@ -196,7 +197,7 @@ On the reference 148-file corpus, a recent smoke with `--query-budgets 10,50` on
 
 **Client takeaway:** feature-space ASR is not a PE-valid red-team finding. A parse-valid ASR of zero with documented closest approach is a defensible result. Do not conflate with “Defender missed it” unless the SOW includes that system.
 
-**Engagement gaps:** GAMMA section injection (`--enable-gamma-sections`), bounded IAT case toggles (`--enable-iat-edits`), graph/byte models, sandbox execution, and commercial AV/EDR are listed under `measurement_scope.not_measured` until the matching flag or SOW adapter is enabled. VT ratios come from a **read-only** sidecar (`vt-sidecar` / `--vt-sidecar`), not live VirusTotal. Sandbox handoff copies `best_bytes` for customer VMs; it does not execute samples. Operator catalog:
+**Engagement gaps:** `measurement_scope.not_measured` always includes sandbox execution, commercial AV/EDR, and graph/byte models unless the SOW uses separate tooling outside this CLI. Optional audit flags move **bounded** transforms into `measured` when enabled: GAMMA section injection (`--enable-gamma-sections`), import-table edits (`--enable-iat-edits`; default search uses API name case toggles and skips thrember no-ops — use `iat-probe` first). SOW adapters (`--sow-adapter sandbox_handoff` or `commercial_av_edr` with ack) add export/provenance under `measured` but **do not** remove sandbox or AV from `not_measured`. VT ratios come from a **read-only** sidecar (`vt-sidecar` / `--vt-sidecar`), not live VirusTotal. Operator catalog:
 
 ```bash
 neurinspectre engagement-gaps
