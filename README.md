@@ -22,8 +22,6 @@
 
 NeurInSpectre rejects the black-box paradigm. By instrumenting model internals—weight matrices, spectral eigenvalues, attention heads, and activation flows—we expose the exact computational mechanisms that drive model decisions. Red Teams gain the ability to systematically identify and exploit model vulnerabilities through white-box analysis. Blue Teams gain the visibility needed to detect adversarial activation patterns and harden against mechanistic attack surfaces. This is security through transparency.
 
-**Deep dive:** see `REPRODUCE.md` and `DRAFT_CODE_AUDIT.md`.
-
 <a id="the-problem"></a>
 
 ## The Problem
