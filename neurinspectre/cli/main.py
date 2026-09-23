@@ -53,6 +53,7 @@ _CLICK_COMMANDS = {
     "download-ember2024-capa",
     "tag-pe-corpus",
     "diagnose-ember-audit",
+    "scope-pe-corpus",
 }
 
 
@@ -1541,6 +1542,16 @@ def table2_smoke_cmd(ctx: click.Context, **kwargs) -> None:
               help="D9: write each sample's best-of-search mutated PE to "
                    "<out>/best_bytes/<sha256>.mutated.bin so transferability "
                    "re-scoring against other detectors is possible offline.")
+@click.option("--crossing-matrix/--no-crossing-matrix", default=False,
+              help="After audit, score best_bytes on EMBER2018 + 2024 PE/Win32/Win64 "
+                   "(requires --save-best-bytes). Crossing rule: clean p>=0.5, bytes "
+                   "changed, mutated p<0.5.")
+@click.option("--capa-diff-best/--no-capa-diff-best", default=False,
+              help="One-shot Capa diff (vivisect/full) original vs each best_bytes "
+                   "file (requires --save-best-bytes). Not a sandbox gate.")
+@click.option("--capa-diff-backend", type=click.Choice(["file_level", "full"]),
+              default="full", show_default=True,
+              help="Capa backend for --capa-diff-best.")
 @click.option(
     "--device",
     type=click.Choice(["cuda", "cpu", "mps", "auto"]),
@@ -1712,14 +1723,50 @@ def score_ember2024_challenge_cmd(
     click.echo(f"  n_miss_all_models: {summary['n_miss_all_models']}")
 
 
+@cli.command("scope-pe-corpus")
+@click.argument("pe_path", type=click.Path(exists=True))
+@click.option("--challenge-dir", type=click.Path(exists=True), default=None,
+              help="EMBER2024 challenge JSONL directory (SHA overlap preflight)")
+@click.option("--supplement-index", type=click.Path(exists=True), default=None,
+              help="EMBER2024 Capa supplement index JSON")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write scope JSON (default: stdout)")
+def scope_pe_corpus_cmd(pe_path, challenge_dir, supplement_index, output):
+    """Hash a PE directory and report overlap with challenge + Capa supplement."""
+    import json as _json
+    from pathlib import Path
+    from neurinspectre.malware.pe_scope import scope_pe_corpus
+
+    pe_root = Path(pe_path)
+    click.echo(f"Hashing MZ files under {pe_root} …", err=True)
+    result = scope_pe_corpus(
+        pe_root,
+        challenge_dir=Path(challenge_dir) if challenge_dir else None,
+        supplement_index=Path(supplement_index) if supplement_index else None,
+    )
+    click.echo(
+        f"  {result['n_mz_files']} files; challenge overlap {result['n_overlap_challenge']}; "
+        f"supplement overlap {result['n_overlap_capa_supplement']}",
+        err=True,
+    )
+    text = _json.dumps(result, indent=2)
+    if output:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        Path(output).write_text(text)
+        click.echo(f"wrote {output}")
+    else:
+        click.echo(text)
+
+
 @cli.command("transferability")
 @click.argument("report", type=click.Path(exists=True))
-@click.option("--models", "-m", multiple=True, required=True,
-              help="Repeatable: name=path pairs, e.g. -m PE=data/ember/ember2024/models/EMBER2024_PE.model "
-                   "-m Win64=data/ember/ember2024/models/EMBER2024_Win64.model")
+@click.option("--models", "-m", multiple=True, required=False,
+              help="Repeatable: name=path pairs, e.g. -m PE=data/ember/ember2024/EMBER2024_PE.model")
+@click.option("--default-crossing/--no-default-crossing", default=False,
+              help="Use shipped EMBER2018 + PE + Win32 + Win64 checkpoints (skip missing).")
 @click.option("--output", "-o", type=click.Path(),
               default=None, help="Write transferability JSON here (default: alongside report)")
-def transferability_cmd(report, models, output):
+def transferability_cmd(report, models, default_crossing, output):
     """D9: re-score an audit's best-of-search mutated PEs against additional
     EMBER 2024 sub-model detectors. Requires the audit to have been run
     with --save-best-bytes.
@@ -1727,12 +1774,18 @@ def transferability_cmd(report, models, output):
     import json as _json
     from pathlib import Path
     from neurinspectre.evaluation.transferability import score_transferability
+    from neurinspectre.evaluation.transferability import default_crossing_model_paths
+
     parsed: list[tuple[str, Path]] = []
-    for m in models:
+    if default_crossing:
+        parsed = [(n, p) for n, p in default_crossing_model_paths() if p.is_file()]
+    for m in models or []:
         if "=" not in m:
             raise click.BadParameter(f"expected name=path, got {m!r}")
         name, path = m.split("=", 1)
         parsed.append((name.strip(), Path(path.strip())))
+    if not parsed:
+        raise click.ClickException("Pass -m name=path and/or --default-crossing")
     result = score_transferability(Path(report), parsed)
     if output:
         Path(output).parent.mkdir(parents=True, exist_ok=True)

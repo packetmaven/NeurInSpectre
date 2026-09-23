@@ -25,6 +25,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 from ..malware.ember2024_extract import extract_ember2024_features
+from ..malware.ember_extract import extract_ember_features
+from ..models.ember_gbdt import EmberGBDT, EmberGBDT2024, EMBER_FEATURE_DIM
 
 
 def _load_report(report_path: Path) -> Dict[str, Any]:
@@ -67,16 +69,42 @@ def _extract_manifest(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     return list(manifest)
 
 
-def _load_model(model_path: Path, name: str):
-    """Load an EMBER GBDT by path.
+def default_crossing_model_paths() -> List[Tuple[str, Path]]:
+    """2018 official GBDT plus the three shipped 2024 PE sub-models."""
+    from pathlib import Path as _P
 
-    Deferred import so unit tests can stub. Returns a model exposing
-    ``predict_proba(features_2d_np)``.
-    """
-    from ..models.ember_gbdt import EmberGBDT2024
-    m = EmberGBDT2024.from_file(Path(model_path))
+    root = _P("data/ember")
+    return [
+        ("EMBER2018", root / "ember2018" / "ember_model_2018.txt"),
+        ("PE", root / "ember2024" / "EMBER2024_PE.model"),
+        ("Win32", root / "ember2024" / "EMBER2024_Win32.model"),
+        ("Win64", root / "ember2024" / "EMBER2024_Win64.model"),
+    ]
+
+
+def _load_model(model_path: Path, name: str):
+    """Load an EMBER 2018 or 2024 GBDT by path."""
+    path = Path(model_path)
+    if path.name == "ember_model_2018.txt" or "ember2018" in path.parts:
+        m = EmberGBDT.from_file(path, feature_dim=EMBER_FEATURE_DIM)
+    elif isinstance(name, str) and name.upper() == "EMBER2018":
+        m = EmberGBDT.from_file(path, feature_dim=EMBER_FEATURE_DIM)
+    else:
+        m = EmberGBDT2024.from_file(path)
     m.classifier_name = name
     return m
+
+
+def _extract_pair(original_bytes: bytes, mutated_bytes: bytes, model) -> tuple:
+    dim = int(getattr(model, "feature_dim", EMBER_FEATURE_DIM))
+    use_v3 = isinstance(model, EmberGBDT2024) or dim != EMBER_FEATURE_DIM
+    if use_v3:
+        extracted_c = extract_ember2024_features(original_bytes)
+        extracted_m = extract_ember2024_features(mutated_bytes)
+    else:
+        extracted_c = extract_ember_features(original_bytes)
+        extracted_m = extract_ember_features(mutated_bytes)
+    return extracted_c, extracted_m
 
 
 def score_transferability(
@@ -168,16 +196,6 @@ def score_transferability(
             continue
         mutated_bytes = mutated_path.read_bytes()
         original_bytes = original_path.read_bytes()
-        extracted_m = extract_ember2024_features(mutated_bytes)
-        extracted_c = extract_ember2024_features(original_bytes)
-        if extracted_m.get("features") is None or extracted_c.get("features") is None:
-            excluded.append({
-                "sha256_original": sha,
-                "problems": ["extract_failed"],
-                "mutated_reasons": extracted_m.get("reasons") or [],
-                "clean_reasons": extracted_c.get("reasons") or [],
-            })
-            continue
         identical = bool(entry.get("identical_to_original")) or mutated_bytes == original_bytes
         row_out: Dict[str, Any] = {
             **entry,
@@ -193,7 +211,18 @@ def score_transferability(
         }
         this_all = True
         this_any = False
+        extract_failed = False
+        fail_reasons: Dict[str, Any] = {}
         for name, model in loaded:
+            extracted_c, extracted_m = _extract_pair(original_bytes, mutated_bytes, model)
+            if extracted_m.get("features") is None or extracted_c.get("features") is None:
+                extract_failed = True
+                fail_reasons = {
+                    "mutated_reasons": extracted_m.get("reasons") or [],
+                    "clean_reasons": extracted_c.get("reasons") or [],
+                    "model": name,
+                }
+                break
             p_clean = _score_vec(model, extracted_c["features"])
             p_mut = _score_vec(model, extracted_m["features"])
             below = bool(p_mut < 0.5)
@@ -210,6 +239,13 @@ def score_transferability(
             below_by_model[name].append(below)
             this_all = this_all and transferred
             this_any = this_any or transferred
+        if extract_failed:
+            excluded.append({
+                "sha256_original": sha,
+                "problems": ["extract_failed"],
+                **fail_reasons,
+            })
+            continue
         per_sample.append(row_out)
         any_transfers.append(this_any)
         all_transfers.append(this_all)

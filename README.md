@@ -266,9 +266,32 @@ Built for red teams, blue teams, and security researchers, it integrates cutting
 
 ## Malware ML — same-sample PE audit
 
+Engagements often ask whether a sample **still runs** and whether a **deployed
+detector** missed it. NeurInSpectre answers a narrower question: a **named
+LightGBM checkpoint**, on **named byte ranges** (Full DOS / overlay / optional
+section-slack), under a **PE parse gate**, at a stated **query budget**. Audit
+reports include a `measurement_scope` block that states what is *not* measured
+(sandbox execution, commercial AV/EDR, GAMMA section injection, graph/byte
+models). Both frames can be honest; only the second is what this CLI produces.
+
 **Malware ML — same-sample PE audit.** Two Elastic-lineage detectors are
 first-class targets. Public EMBER releases (2018 and 2024) do not ship PE
 binaries; same-sample work requires `--pe-sample`.
+
+Authorized red-team workflow (measurement frame, preflight, crossing matrix):
+[docs/guides/AUTHORIZED_REDTEAM_EMBER.md](docs/guides/AUTHORIZED_REDTEAM_EMBER.md).
+
+```bash
+neurinspectre scope-pe-corpus ./pe \
+  --supplement-index data/ember/ember2024/capa_supplement_index.json
+neurinspectre audit --target ember2024-gbdt --pe-sample ./pe \
+  --require-detected --query-budgets 10,50,100,500,5000 \
+  --save-best-bytes --crossing-matrix
+python scripts/diagnose_ember_audit.py results/audit_<run>
+```
+
+`audit_report.json` includes `measurement_scope` and `pipeline` (problem-space only for GBDT).
+`--crossing-matrix` scores best bytes on EMBER2018 + 2024 PE/Win32/Win64 when checkpoints exist.
 
 *EMBER 2018 LightGBM (`ember_model_2018.txt`, dim 2381, LIEF-based v2
 extractor)*
@@ -276,6 +299,7 @@ extractor)*
 ```bash
 neurinspectre audit --target ember-gbdt --pe-sample /pe --require-detected
 neurinspectre audit --target ember-gbdt --pe-sample /pe --require-official-reproduction
+bash scripts/audit_ember_linux_lief090.sh /pe   # official quote_as_ember2018 (Linux LIEF 0.9.0)
 ```
 
 `--require-official-reproduction` here fails closed unless Elastic-verified

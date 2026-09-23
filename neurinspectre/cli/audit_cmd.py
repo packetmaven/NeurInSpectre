@@ -251,7 +251,7 @@ def default_carmon_model(
     }
 
 
-DEFAULT_QUERY_BUDGETS = [100, 500, 2000, 5000]
+DEFAULT_QUERY_BUDGETS = [10, 50, 100, 500, 5000]
 SMOKE_QUERY_BUDGETS = [10, 25, 50]
 
 
@@ -636,9 +636,16 @@ def build_audit_report(summary: Dict[str, Any], *, config: Dict[str, Any]) -> Di
                 "Pass --pe-sample with PE files for the same-sample table."
             ),
         }
+    target_str = str(audit_meta.get("target") or "")
+    measurement_scope = None
+    if _is_ember_target(target_str):
+        from ..malware.measurement_scope import build_measurement_scope
+
+        measurement_scope = build_measurement_scope(target_str)
     return {
         "kind": "neurinspectre_audit",
         "target": audit_meta.get("target"),
+        "measurement_scope": measurement_scope,
         "defense": row.get("defense"),
         "defense_type": row.get("type"),
         "dataset": row.get("dataset", "cifar10"),
@@ -693,14 +700,19 @@ def characterize_audit_pipeline(target: str, *, device: str = "cpu") -> Dict[str
     """Describe the audit target as a SecurityPipeline without reloading Carmon."""
     import torch.nn as nn
 
+    from ..malware.measurement_scope import enrich_gbdt_pipeline_characterization
+
     key = _normalize_target(target)
     dummy = nn.Identity()
     if key == "ember-gbdt":
-        return SecurityPipeline.from_ember_gbdt(dummy, device=device).characterize()
+        base = SecurityPipeline.from_ember_gbdt(dummy, device=device).characterize()
+        return enrich_gbdt_pipeline_characterization(base, key)
     if key in EMBER2024_TARGETS:
-        return SecurityPipeline.from_ember2024_gbdt(
-            dummy, device=device, variant=key.replace("ember2024-", "").replace("-gbdt", "")
+        variant = key.replace("ember2024-", "").replace("-gbdt", "")
+        base = SecurityPipeline.from_ember2024_gbdt(
+            dummy, device=device, variant=variant
         ).characterize()
+        return enrich_gbdt_pipeline_characterization(base, key)
     if key == "jpeg-carmon":
         from ..defenses.wrappers import JPEGCompressionDefense
 
@@ -712,6 +724,11 @@ def characterize_audit_pipeline(target: str, *, device: str = "cpu") -> Dict[str
 
 
 def run_audit(ctx: click.Context, **kwargs: Any) -> None:
+    if bool(kwargs.get("crossing_matrix")) or bool(kwargs.get("capa_diff_best")):
+        if not bool(kwargs.get("save_best_bytes")):
+            raise click.ClickException(
+                "--crossing-matrix and --capa-diff-best require --save-best-bytes"
+            )
     target = str(kwargs.get("target") or "carmon")
     output_dir = Path(str(kwargs.get("output_dir") or "results/audit"))
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -955,6 +972,49 @@ def run_audit(ctx: click.Context, **kwargs: Any) -> None:
     report_path = output_dir / "audit_report.json"
     save_json(report, report_path)
     click.echo(f"[audit] report written to {report_path}")
+
+    if _is_ember_target(report.get("target") or "") and report.get("measurement_scope"):
+        click.echo(
+            "[audit] measurement_scope: named LightGBM + parse gate + query budget "
+            "(not sandbox / AV / section-injection SOW)"
+        )
+
+    if bool(kwargs.get("crossing_matrix")):
+        from ..evaluation.transferability import (
+            default_crossing_model_paths,
+            score_transferability,
+        )
+
+        models = [
+            (name, p) for name, p in default_crossing_model_paths() if p.is_file()
+        ]
+        if models:
+            crossing = score_transferability(report_path, models)
+            crossing_path = output_dir / "crossing_matrix.json"
+            save_json(crossing, crossing_path)
+            click.echo(
+                f"[audit] crossing_matrix -> {crossing_path} "
+                f"n_samples={crossing.get('n_samples')}"
+            )
+        else:
+            click.echo("[audit] crossing_matrix skipped (no default model files on disk)")
+
+    if bool(kwargs.get("capa_diff_best")):
+        from ..evaluation.capa_diff_audit import capa_diff_best_bytes_report
+
+        capa_report = capa_diff_best_bytes_report(
+            report_path,
+            rules_dir=Path(kwargs["capa_rules_dir"])
+            if kwargs.get("capa_rules_dir")
+            else None,
+            backend=str(kwargs.get("capa_diff_backend") or "full"),
+        )
+        capa_path = output_dir / "capa_diff_audit.json"
+        save_json(capa_report, capa_path)
+        click.echo(
+            f"[audit] capa_diff_audit -> {capa_path} "
+            f"n_scanned={capa_report.get('n_scanned')} errors={capa_report.get('n_errors')}"
+        )
 
     # A3 — always attempt the Capa-tagged claim ledger. Cheap; no-op when
     # there is no same_sample_detail or when the samples carry no tags.

@@ -92,9 +92,17 @@ def _summarize(report: dict) -> dict:
         "transforms": transforms,
         "top_drops": top[:10],
         "extractor_status": (same.get("extractor") or {}).get("shims"),
+        "query_curve": (problem.get("query_curve") if isinstance(problem, dict) else None),
+        "measurement_scope": report.get("measurement_scope"),
+        "closest_still_malicious": (
+            closest
+            if closest and float(closest.get("best", 1.0)) >= 0.5
+            else None
+        ),
         "notes": [
             "Feature-space ASR is unrealizable L-inf on mixed-scale features; not PE-valid.",
             "Problem-space is Full DOS + padding/overlay. Validity is parse-only.",
+            "measurement_scope in the report lists what this CLI does not claim (sandbox, AV, section injection).",
         ],
     }
 
